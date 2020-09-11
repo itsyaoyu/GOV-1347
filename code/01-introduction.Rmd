@@ -1,0 +1,81 @@
+---
+title: "01-introduction"
+author: "Yao Yu"
+date: "9/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in libraries
+
+library(scales)
+library(tidyverse)
+library(plotly)
+
+# Reading in data
+
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv",
+                    col_types = cols(
+                                year = col_double(),
+                                party = col_character(),
+                                winner = col_logical(),
+                                candidate = col_character(),
+                                pv = col_double(),
+                                pv2p = col_double(),
+                                incumbent = col_logical(),
+                                incumbent_party = col_logical(),
+                                prev_admin = col_logical()
+                              ))
+
+popvote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv",
+                          col_types = cols(
+                                      state = col_character(),
+                                      year = col_double(),
+                                      total = col_double(),
+                                      D = col_double(),
+                                      R = col_double(),
+                                      R_pv2p = col_double(),
+                                      D_pv2p = col_double()
+                                    ))
+
+```
+
+```{r looking at incumbency}
+
+# Pulling out winners and highlighting incumbency using color. Changed popular
+# vote to a decimal for percentage label.
+
+incumbency_pv <- popvote %>% 
+  filter(winner == TRUE) %>%
+  mutate(pv = pv / 100) %>% 
+  ggplot(aes(x = year, y = pv, color = incumbent, label = candidate)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, formula = y ~ x) +
+  theme_classic() +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_x_continuous(breaks = c(1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020), 
+                     labels = c(1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020)) +
+  labs(title = "Percentage of Popular Vote won by US Presidents",
+       subtitle = "grouped by incumbency",
+       x = "Year",
+       y = "Popular Vote (%)",
+       color = "Incumbent")
+
+ggplotly(incumbency_pv, tooltip = c("candidate", "year", "pv"))
+
+```
+
+```{r electoral college}
+
+
+
+```
+
+```{r purple states}
+
+
+
+```
+
