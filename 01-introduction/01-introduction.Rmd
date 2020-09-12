@@ -1,0 +1,240 @@
+---
+title: "01-introduction"
+author: "Yao Yu"
+date: "9/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in libraries
+
+library(scales)
+library(tidyverse)
+library(plotly)
+library(jtools)
+library(htmlwidgets)
+library(kableExtra)
+
+
+# Reading in data
+
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv",
+                    col_types = cols(
+                                year = col_double(),
+                                party = col_character(),
+                                winner = col_logical(),
+                                candidate = col_character(),
+                                pv = col_double(),
+                                pv2p = col_double(),
+                                incumbent = col_logical(),
+                                incumbent_party = col_logical(),
+                                prev_admin = col_logical()
+                              ))
+
+popvote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv",
+                          col_types = cols(
+                                      state = col_character(),
+                                      year = col_double(),
+                                      total = col_double(),
+                                      D = col_double(),
+                                      R = col_double(),
+                                      R_pv2p = col_double(),
+                                      D_pv2p = col_double()
+                                    ))
+
+electoral_votes <- read_csv("../data/01-introduction/ec_1952-2020.csv",
+                            col_types = cols(
+                                        state = col_character(),
+                                        electors = col_double(),
+                                        year = col_double()
+                                      ))
+
+```
+
+```{r looking at incumbency}
+
+# plotly interactive graphics are being saved using the advice found here:
+# https://plotly-r.com/saving.html
+
+# Pulling out winners and highlighting incumbency using color. Changed popular
+# vote to a decimal for percentage label.
+
+incumbency_pv <- popvote %>% 
+  filter(winner == TRUE) %>%
+  mutate(pv = pv / 100) %>% 
+  ggplot(aes(x = year, y = pv, color = incumbent, label = candidate)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, formula = y ~ x) +
+  theme_classic() +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_x_continuous(breaks = c(1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020), 
+                     labels = c(1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020)) +
+  labs(title = "Percentage of Popular Vote won by US Presidents",
+       subtitle = "grouped by incumbency",
+       x = "Year",
+       y = "Popular Vote (%)",
+       color = "Incumbent")
+
+# Plotting the data using plotly
+
+incumbency_pv_graphic <- ggplotly(incumbency_pv, tooltip = c("candidate", "year", "pv"))
+
+# Saving the plot to be imported into the blog
+
+saveWidget(incumbency_pv_graphic, "incumbency.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
+```{r electoral college}
+
+# Adding in number of electoral electors to data, thanks to Soubhik for
+# providing the data.
+
+electoral_college <- popvote_state %>% 
+  left_join(electoral_votes, by = c("state", "year"))
+
+# Calculating winner, taking into account the split votes in NE and ME
+
+electoral_college <- electoral_college %>% 
+  mutate(winner = case_when(
+    state == "Maine" & year >= 1972 ~ "split",
+    state == "Nebraska" & year >= 1992 ~ "split",
+    D > R ~ "democrat",
+    TRUE ~ "republican"
+  ))
+
+# Pulling out the winning party for each election
+
+winner_party <- popvote %>% 
+  filter(winner == TRUE) %>% 
+  select(year, party) %>% 
+  rename(general_winner = party)
+
+# Adding in winning party for each election to data
+
+electoral_college <- electoral_college %>% 
+  left_join(winner_party, by = "year") %>% 
+  mutate(win_election = ifelse(winner == general_winner, 1, 0))
+
+model <- lm(win_election ~ state, data = electoral_college)
+
+# Model output for blog using this method:
+# https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+
+summ(model, confint = TRUE)
+
+```
+
+
+```{r electoral college map}
+
+# Adding State abbreviations to the data
+
+states <- tibble(state = state.name, abb = state.abb)
+
+electoral_college <- popvote_state %>% 
+  left_join(states, by = "state")
+
+# Calculating winner, not taking into account the split votes in NE and ME
+
+electoral_college <- electoral_college %>% 
+  mutate(winner = case_when(
+    D > R ~ 1,
+    TRUE ~ 0
+  )) %>% 
+  mutate(winner_party = case_when(
+    winner == 1 ~ "Democrat",
+    TRUE ~ "Republican"
+  ))
+
+# Adding hover text
+
+electoral_college <- electoral_college %>% 
+  mutate(hover = paste(winner_party, "<br>", "D: ", D, "<br>", "R: ", R, sep = ""))
+
+# Code below is taken from Plotly's Cloropleth Maps example:
+# https://plotly.com/r/choropleth-maps/
+
+# specify some map projection/options
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = FALSE,
+  lakecolor = toRGB('white')
+)
+
+fig <- plot_geo(electoral_college, locationmode = 'USA-states')
+fig <- fig %>% add_trace(
+    z = ~winner, text = ~hover, locations = ~abb,
+    color = ~winner, colors = c("Red", "Blue"), frame = ~year,
+    showscale = FALSE
+  )
+fig <- fig %>% layout(
+    title = 'US Presidential Election Electoral College Results 1948-2016',
+    geo = g
+  )
+
+# Saving the plot to be imported into the blog
+
+saveWidget(fig, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
+```{r purple states}
+
+# Adding State abbreviations to the data
+
+states <- tibble(state = state.name, abb = state.abb)
+
+purple_states <- popvote_state %>% 
+  left_join(states, by = "state")
+
+# Filtering for elections 1968 and forward to avoid NA values
+
+purple_states <- purple_states %>% 
+  filter(year >= 1966) %>% 
+  arrange(state, year)
+
+# Calculating values for the swing map and then removing 1968 (no results from
+# befrore)
+
+purple_states <- purple_states %>% 
+  mutate(swing = case_when(
+    state == lag(state) ~ (D/(D+R))-(lag(D)/(lag(D)+lag(R))),
+    TRUE ~ -1
+  )) %>% 
+  filter(year != 1968)
+
+# Code below is taken from Plotly's Cloropleth Maps example:
+# https://plotly.com/r/choropleth-maps/
+
+# specify some map projection/options
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = FALSE,
+  lakecolor = toRGB('white')
+)
+
+fig <- plot_geo(purple_states, locationmode = 'USA-states')
+fig <- fig %>% add_trace(
+    z = ~swing, locations = ~abb,
+    color = ~purple_states, colors = 'Purples', frame = ~year,
+    zmin = -0.5, zmax = 0.5
+  )
+fig <- fig %>% colorbar(title = 'Swing')
+fig <- fig %>% layout(
+    title = 'US Presidential Election Electoral College Results 1948-2016',
+    geo = g
+  )
+
+fig
+
+# Saving the plot to be imported into the blog
+
+# saveWidget(fig, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
