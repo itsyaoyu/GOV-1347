@@ -184,8 +184,6 @@ saveWidget(fig, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
 
 ```{r purple states}
 
-# This graphic was not included in the final blog post.
-
 # Adding State abbreviations to the data
 
 states <- tibble(state = state.name, abb = state.abb)
@@ -236,7 +234,7 @@ fig
 
 # Saving the plot to be imported into the blog
 
-# saveWidget(fig, "swing_states.html", selfcontained = FALSE, libdir = "lib")
+saveWidget(fig, "swing_states.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
