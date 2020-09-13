@@ -83,7 +83,7 @@ incumbency_pv_graphic <- ggplotly(incumbency_pv, tooltip = c("candidate", "year"
 
 # Saving the plot to be imported into the blog
 
-saveWidget(incumbency_pv_graphic, "incumbency.html", selfcontained = FALSE, libdir = "lib")
+# saveWidget(incumbency_pv_graphic, "incumbency.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
@@ -158,49 +158,47 @@ electoral_college <- electoral_college %>%
 # https://plotly.com/r/choropleth-maps/
 
 # specify some map projection/options
-g <- list(
+map_options <- list(
   scope = 'usa',
   projection = list(type = 'albers usa'),
   showlakes = FALSE,
   lakecolor = toRGB('white')
 )
 
-fig <- plot_geo(electoral_college, locationmode = 'USA-states')
-fig <- fig %>% add_trace(
-    z = ~winner, text = ~hover, locations = ~abb,
-    color = ~winner, colors = c("Red", "Blue"), frame = ~year,
-    showscale = FALSE
-  )
-fig <- fig %>% layout(
-    title = 'US Presidential Election Electoral College Results 1948-2016',
-    geo = g
-  )
+electoral_map <- plot_geo(electoral_college, locationmode = 'USA-states') %>% 
+  add_trace(z = ~winner, text = ~hover, locations = ~abb, 
+            color = ~winner, colors = c("Red", "Blue"), frame = ~year,
+            showscale = FALSE) %>% 
+  layout(title = 'US Presidential Election Electoral College Results 1948-2016',
+         geo = map_options)
+
+electoral_map
 
 # Saving the plot to be imported into the blog
 
-saveWidget(fig, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
+# saveWidget(electoral_map, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
-```{r purple states}
+```{r swing states}
 
 # Adding State abbreviations to the data
 
 states <- tibble(state = state.name, abb = state.abb)
 
-purple_states <- popvote_state %>% 
+swing_states <- popvote_state %>% 
   left_join(states, by = "state")
 
 # Filtering for elections 1968 and forward to avoid NA values
 
-purple_states <- purple_states %>% 
+swing_states <- swing_states %>% 
   filter(year >= 1966) %>% 
   arrange(state, year)
 
 # Calculating values for the swing map and then removing 1968 (no results from
 # befrore)
 
-purple_states <- purple_states %>% 
+swing_states <- swing_states %>% 
   mutate(swing = case_when(
     state == lag(state) ~ (R/(D+R))-(lag(R)/(lag(D)+lag(R))),
     TRUE ~ -1
@@ -211,30 +209,26 @@ purple_states <- purple_states %>%
 # https://plotly.com/r/choropleth-maps/
 
 # specify some map projection/options
-g <- list(
+map_options <- list(
   scope = 'usa',
   projection = list(type = 'albers usa'),
   showlakes = FALSE,
   lakecolor = toRGB('white')
 )
 
-fig <- plot_geo(purple_states, locationmode = 'USA-states')
-fig <- fig %>% add_trace(
-    z = ~swing, locations = ~abb,
-    color = ~purple_states, colors = 'Purples', frame = ~year,
-    zmin = -0.5, zmax = 0.5
-  )
-fig <- fig %>% colorbar(title = 'Swing')
-fig <- fig %>% layout(
-    title = 'Swing States 1972-2016',
-    geo = g
-  )
+swing_map <- plot_geo(swing_states, locationmode = 'USA-states') %>% 
+  add_trace(z = ~swing, locations = ~abb,
+            color = ~swing_states, colors = 'Purples', frame = ~year,
+            zmin = -0.5, zmax = 0.5) %>% 
+  colorbar(title = 'Swing') %>% 
+  layout(title = 'Swing States 1972-2016',
+         geo = map_options)
 
-fig
+swing_map
 
 # Saving the plot to be imported into the blog
 
-saveWidget(fig, "swing_states.html", selfcontained = FALSE, libdir = "lib")
+# saveWidget(swing_map, "swing_states.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
