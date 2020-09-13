@@ -184,6 +184,8 @@ saveWidget(fig, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
 
 ```{r purple states}
 
+# This graphic was not included in the final blog post.
+
 # Adding State abbreviations to the data
 
 states <- tibble(state = state.name, abb = state.abb)
@@ -202,7 +204,7 @@ purple_states <- purple_states %>%
 
 purple_states <- purple_states %>% 
   mutate(swing = case_when(
-    state == lag(state) ~ (D/(D+R))-(lag(D)/(lag(D)+lag(R))),
+    state == lag(state) ~ (R/(D+R))-(lag(R)/(lag(D)+lag(R))),
     TRUE ~ -1
   )) %>% 
   filter(year != 1968)
@@ -226,7 +228,7 @@ fig <- fig %>% add_trace(
   )
 fig <- fig %>% colorbar(title = 'Swing')
 fig <- fig %>% layout(
-    title = 'US Presidential Election Electoral College Results 1948-2016',
+    title = 'Swing States 1972-2016',
     geo = g
   )
 
@@ -234,7 +236,7 @@ fig
 
 # Saving the plot to be imported into the blog
 
-# saveWidget(fig, "electoral_college.html", selfcontained = FALSE, libdir = "lib")
+# saveWidget(fig, "swing_states.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
