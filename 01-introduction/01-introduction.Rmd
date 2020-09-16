@@ -63,8 +63,12 @@ electoral_votes <- read_csv("../data/01-introduction/ec_1952-2020.csv",
 
 incumbency_pv <- popvote %>% 
   filter(winner == TRUE) %>%
-  mutate(pv = pv / 100) %>% 
-  ggplot(aes(x = year, y = pv, color = incumbent, label = candidate)) +
+  mutate(pv = round(pv / 100, digits = 2),
+         incumbent_text = as.factor(case_when(
+           incumbent == TRUE ~ "Incumbent",
+           TRUE ~ "Challenger"
+         ))) %>% 
+  ggplot(aes(x = year, y = pv, color = fct_relevel(incumbent_text, "Incumbent", "Challenger"), label = candidate)) +
   geom_point() +
   geom_smooth(method = "lm", se = FALSE, formula = y ~ x) +
   theme_classic() +
@@ -75,7 +79,7 @@ incumbency_pv <- popvote %>%
        subtitle = "grouped by incumbency",
        x = "Year",
        y = "Popular Vote (%)",
-       color = "Incumbent")
+       color = "")
 
 # Plotting the data using plotly
 
