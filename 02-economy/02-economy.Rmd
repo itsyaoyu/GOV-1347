@@ -18,6 +18,7 @@ library(rjson)
 library(jtools)
 library(htmlwidgets)
 library(kableExtra)
+library(reactable)
 
 # Reading in data. Choosing the variables I want to use in my model and removing
 # NAs in economic data
@@ -47,8 +48,7 @@ economy_2020_q2 <- economy %>%
          quarter == 2) 
 
 # I'm choosing to make independent models for GDP per quarter, RDI, and
-# unemployment while keeping quarter as a second predictive variable in each
-# model
+# unemployment
 
 gdp_model <- lm(data = economy_model_data, pv ~ GDP_growth_qt)
 rdi_model <- lm(data = economy_model_data, pv ~ RDI_growth)
@@ -60,24 +60,50 @@ summ(gdp_model, confint = TRUE)
 summ(rdi_model, confint = TRUE)
 summ(unemployment_model, confint = TRUE)
 
-# Predicting 2020 pv
+# Predicting 2020 pv using the three models
 
 pred_2020 <- tibble(predictive_variable = c("GDP", "RDI", "Unemployment"),
+                    data_2020 = c(economy_2020_q2$GDP_growth_qt / 100,
+                                  economy_2020_q2$RDI_growth / 100,
+                                  economy_2020_q2$unemployment / 100),
                     pv = c(predict(gdp_model, economy_2020_q2) / 100, 
                            predict(rdi_model, economy_2020_q2) / 100, 
                            predict(unemployment_model, economy_2020_q2) / 100),
-                    year = 2020) %>% 
-  left_join(economy_2020_q2, by = "year")
+                    lower = c(predict(gdp_model, economy_2020_q2, interval = "prediction")[2] / 100,
+                              predict(rdi_model, economy_2020_q2, interval = "prediction")[2] / 100,
+                              predict(unemployment_model, economy_2020_q2, interval = "prediction")[2] / 100),
+                    upper = c(predict(gdp_model, economy_2020_q2, interval = "prediction")[3] / 100,
+                              predict(rdi_model, economy_2020_q2, interval = "prediction")[3] / 100,
+                              predict(unemployment_model, economy_2020_q2, interval = "prediction")[3] / 100))
+
+# Table for 2020 Prediction Results
+
+model_2020_table <- reactable(
+  pred_2020, 
+  columns = list(
+    predictive_variable = colDef(name = "Economic Variable"),
+    data_2020 = colDef(name = "2020 Data", format = colFormat(percent = TRUE, digits = 2)),
+    pv = colDef(name = "Estimated Popular Vote", format = colFormat(percent = TRUE, digits = 2)),
+    lower = colDef(name = "2.5% CI", format = colFormat(percent = TRUE, digits = 2)),
+    upper = colDef(name = "97.5% CI", format = colFormat(percent = TRUE, digits = 2))),
+  defaultColDef = colDef(
+    align = "center",
+    minWidth = 70,
+    headerStyle = list(background = "#f7f7f8")
+  ),
+  bordered = TRUE,
+  highlight = TRUE)
+
+# saveWidget(model_2020_table, "gdp_pv_table.html", selfcontained = FALSE, libdir = "lib")
 
 # Graphing the rdi model, which gave the best results out of the three
 
 gdp_graph <- economy_model_data %>% 
   mutate(pv = round(pv / 100, digits = 2),
          GDP_growth_qt = GDP_growth_qt / 100,
-         label = paste(candidate, "-", year, sep = " ")) %>% 
-  ggplot(aes(x = GDP_growth_qt, y = pv, label = label)) +
+         candidate = paste(candidate, "-", year, sep = " ")) %>% 
+  ggplot(aes(x = GDP_growth_qt, y = pv, label = candidate)) +
   geom_point() +
-  geom_point(data = pred_2020, x = )
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
   theme_classic() +
   labs(title = "Predicting Popular Vote using Election Year Q2 GDP Growth",
@@ -86,7 +112,9 @@ gdp_graph <- economy_model_data %>%
   scale_x_continuous(labels = percent_format(accuracy = 1)) +
   scale_y_continuous(labels = percent_format(accuracy = 1))
 
-ggplotly(gdp_graph, tooltip = c("label", "pv"))
+gdp_graph_plotly <- ggplotly(gdp_graph, tooltip = c("label", "pv"))
+
+# saveWidget(gdp_graph_plotly, "gdp_pv_plot.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
@@ -148,7 +176,8 @@ local_model_data <- popvote_state %>%
   left_join(popvote, by = "year") %>% 
   filter(incumbent_party == TRUE) %>% 
   left_join(local, by = c("state" = "state_and_area", "year")) %>% 
-  filter(month == "07")
+  filter(month == "07",
+         state %in% c("Florida", "Ohio", "Maine", "North Carolina", "Georgia", "Pennsylvania"))
 
 local_model <- lm(data = local_model_data, pv ~ state:unemployed_prce)
 summ(local_model)
