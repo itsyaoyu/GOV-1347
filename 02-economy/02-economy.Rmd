@@ -1,0 +1,191 @@
+---
+title: "02-Economy"
+author: "Yao Yu"
+date: "9/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in libraries
+
+library(tidyverse)
+library(scales)
+library(janitor)
+library(plotly)
+library(rjson)
+library(jtools)
+library(htmlwidgets)
+library(kableExtra)
+
+# Reading in data. Choosing the variables I want to use in my model and removing
+# NAs in economic data
+
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv") %>% 
+  select(year, party, winner, candidate, pv, incumbent, incumbent_party)
+popvote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv")
+economy <- read_csv("../data/02-economy/econ.csv") %>% 
+  drop_na() %>% 
+  select(year, quarter, GDP_growth_qt, GDP_growth_yr, RDI_growth, unemployment, stock_open)
+local <- read_csv("../data/02-economy/local.csv") %>% 
+  clean_names()
+```
+
+```{r economy model}
+
+# Joining the popular vote data with the economy data. I'm only picking the Q2
+# data because we currently do not have Q3 data for 2020
+
+economy_model_data <- popvote %>% 
+  filter(incumbent_party == TRUE) %>% 
+  inner_join(economy, by = "year") %>% 
+  filter(quarter == 2)
+
+economy_2020_q2 <- economy %>% 
+  filter(year == 2020,
+         quarter == 2) 
+
+# I'm choosing to make independent models for GDP per quarter, RDI, and
+# unemployment while keeping quarter as a second predictive variable in each
+# model
+
+gdp_model <- lm(data = economy_model_data, pv ~ GDP_growth_qt)
+rdi_model <- lm(data = economy_model_data, pv ~ RDI_growth)
+unemployment_model <- lm(data = economy_model_data, pv ~ unemployment)
+
+# Viewing results of the model
+
+summ(gdp_model, confint = TRUE)
+summ(rdi_model, confint = TRUE)
+summ(unemployment_model, confint = TRUE)
+
+# Predicting 2020 pv
+
+pred_2020 <- tibble(predictive_variable = c("GDP", "RDI", "Unemployment"),
+                    pv = c(predict(gdp_model, economy_2020_q2) / 100, 
+                           predict(rdi_model, economy_2020_q2) / 100, 
+                           predict(unemployment_model, economy_2020_q2) / 100),
+                    year = 2020) %>% 
+  left_join(economy_2020_q2, by = "year")
+
+# Graphing the rdi model, which gave the best results out of the three
+
+gdp_graph <- economy_model_data %>% 
+  mutate(pv = round(pv / 100, digits = 2),
+         GDP_growth_qt = GDP_growth_qt / 100,
+         label = paste(candidate, "-", year, sep = " ")) %>% 
+  ggplot(aes(x = GDP_growth_qt, y = pv, label = label)) +
+  geom_point() +
+  geom_point(data = pred_2020, x = )
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  theme_classic() +
+  labs(title = "Predicting Popular Vote using Election Year Q2 GDP Growth",
+       x = "Election Year Q2 GDP Growth",
+       y = "Incumbent Party Popular Vote") +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1))
+
+ggplotly(gdp_graph, tooltip = c("label", "pv"))
+
+```
+
+
+```{r adding incumbency to the mix}
+
+# Joining the popular vote data with the economy data while also adding in the
+# incumbent legend labels and filtering for incumbent party. I'm only picking
+# the Q2 data because we currently do not have Q3 data for 2020.
+
+economy_model_data <- popvote %>% 
+  filter(incumbent_party == TRUE) %>% 
+  inner_join(economy, by = "year") %>% 
+  filter(quarter == 2) %>% 
+  mutate(incumbent_text = case_when(
+    incumbent == TRUE ~ "Incumbent",
+    TRUE ~ "Non-Incumbent"
+  ))
+
+# I'm choosing to make independent models for GDP per quarter, RDI, and
+# unemployment while keeping incumbent as a second predictive variable in each
+# model
+
+gdp_model <- lm(data = economy_model_data, pv ~ GDP_growth_qt + incumbent)
+rdi_model <- lm(data = economy_model_data, pv ~ RDI_growth + incumbent)
+unemployment_model <- lm(data = economy_model_data, pv ~ unemployment + incumbent)
+
+# Viewing results of the model
+
+summ(gdp_model, confint = TRUE)
+summ(rdi_model, confint = TRUE)
+summ(unemployment_model, confint = TRUE)
+
+# Graphing the gdp model, which gave the second best result out of the three
+
+gdp_incumbent_graph <- economy_model_data %>% 
+  mutate(pv = round(pv / 100, digits = 2),
+         GDP_growth_qt = GDP_growth_qt / 100,
+         label = paste(candidate, "-", year, sep = " ")) %>% 
+  ggplot(aes(x = GDP_growth_qt, y = pv, color = incumbent_text, label = label)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  theme_classic() +
+  labs(title = "Predicting Popular Vote using Election Year Q2 GDP Growth\nfor Incumbents and same party Non-Incumbents",
+       x = "Election Year Q2 GDP Growth",
+       y = "Incumbent Party Popular Vote",
+       color = "") +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1))
+
+ggplotly(gdp_incumbent_graph, tooltip = c("label", "pv"))
+
+```
+
+
+```{r local model}
+
+local_model_data <- popvote_state %>% 
+  left_join(popvote, by = "year") %>% 
+  filter(incumbent_party == TRUE) %>% 
+  left_join(local, by = c("state" = "state_and_area", "year")) %>% 
+  filter(month == "07")
+
+local_model <- lm(data = local_model_data, pv ~ state:unemployed_prce)
+summ(local_model)
+
+```
+
+
+```{r local plotly}
+
+# Code below is taken from Plotly's Cloropleth County Maps example:
+# https://plotly.com/r/mapbox-county-choropleth/
+
+url <- 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
+counties <- rjson::fromJSON(file=url)
+url2<- "https://raw.githubusercontent.com/plotly/datasets/master/fips-unemp-16.csv"
+df <- read.csv(url2, colClasses=c(fips="character"))
+fig <- plot_ly() 
+fig <- fig %>% add_trace(
+    type="choroplethmapbox",
+    geojson=counties,
+    locations=df$fips,
+    z=df$unemp,
+    colorscale="Viridis",
+    zmin=0,
+    zmax=12,
+    marker=list(line=list(
+      width=0),
+      opacity=0.5
+    )
+  )
+fig <- fig %>% layout(
+    mapbox=list(
+      style="carto-positron",
+      zoom =2,
+      center=list(lon= -95.71, lat=37.09))
+  )
+fig
+
+```
+

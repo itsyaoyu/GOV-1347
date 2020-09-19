@@ -78,7 +78,7 @@ incumbency_pv <- popvote %>%
   labs(title = "Percentage of Popular Vote won by US Presidents",
        subtitle = "grouped by incumbency",
        x = "Year",
-       y = "Popular Vote (%)",
+       y = "Popular Vote",
        color = "")
 
 # Plotting the data using plotly
