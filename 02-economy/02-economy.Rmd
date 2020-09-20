@@ -60,7 +60,8 @@ summ(gdp_model, confint = TRUE)
 summ(rdi_model, confint = TRUE)
 summ(unemployment_model, confint = TRUE)
 
-# Predicting 2020 pv using the three models
+# Predicting 2020 pv using the three models and putting them in a nice table. I
+# divide each number by 100 to format them as percentages in the tables/graphs.
 
 pred_2020 <- tibble(predictive_variable = c("GDP", "RDI", "Unemployment"),
                     data_2020 = c(economy_2020_q2$GDP_growth_qt / 100,
@@ -148,6 +149,48 @@ summ(gdp_model, confint = TRUE)
 summ(rdi_model, confint = TRUE)
 summ(unemployment_model, confint = TRUE)
 
+# Adding in incumbent data for 2020
+
+economy_2020_q2 <- economy_2020_q2 %>% 
+  mutate(incumbent = TRUE)
+
+# Predicting 2020 pv using the three models and putting them in a nice table. I
+# divide each number by 100 to format them as percentages in the tables/graphs.
+
+pred_2020 <- tibble(predictive_variable = c("GDP", "RDI", "Unemployment"),
+                    data_2020 = c(economy_2020_q2$GDP_growth_qt / 100,
+                                  economy_2020_q2$RDI_growth / 100,
+                                  economy_2020_q2$unemployment / 100),
+                    pv = c(predict(gdp_model, economy_2020_q2) / 100, 
+                           predict(rdi_model, economy_2020_q2) / 100, 
+                           predict(unemployment_model, economy_2020_q2) / 100),
+                    lower = c(predict(gdp_model, economy_2020_q2, interval = "prediction")[2] / 100,
+                              predict(rdi_model, economy_2020_q2, interval = "prediction")[2] / 100,
+                              predict(unemployment_model, economy_2020_q2, interval = "prediction")[2] / 100),
+                    upper = c(predict(gdp_model, economy_2020_q2, interval = "prediction")[3] / 100,
+                              predict(rdi_model, economy_2020_q2, interval = "prediction")[3] / 100,
+                              predict(unemployment_model, economy_2020_q2, interval = "prediction")[3] / 100))
+
+# Table for 2020 Prediction Results
+
+model_2020_table <- reactable(
+  pred_2020, 
+  columns = list(
+    predictive_variable = colDef(name = "Economic Variable"),
+    data_2020 = colDef(name = "2020 Data", format = colFormat(percent = TRUE, digits = 2)),
+    pv = colDef(name = "Estimated Popular Vote", format = colFormat(percent = TRUE, digits = 2)),
+    lower = colDef(name = "2.5% CI", format = colFormat(percent = TRUE, digits = 2)),
+    upper = colDef(name = "97.5% CI", format = colFormat(percent = TRUE, digits = 2))),
+  defaultColDef = colDef(
+    align = "center",
+    minWidth = 70,
+    headerStyle = list(background = "#f7f7f8")
+  ),
+  bordered = TRUE,
+  highlight = TRUE)
+
+# saveWidget(model_2020_table, "gdp_pv_table.html", selfcontained = FALSE, libdir = "lib")
+
 # Graphing the gdp model, which gave the second best result out of the three
 
 gdp_incumbent_graph <- economy_model_data %>% 
@@ -165,56 +208,70 @@ gdp_incumbent_graph <- economy_model_data %>%
   scale_x_continuous(labels = percent_format(accuracy = 1)) +
   scale_y_continuous(labels = percent_format(accuracy = 1))
 
-ggplotly(gdp_incumbent_graph, tooltip = c("label", "pv"))
+gdp_incumbent_graph_plotly <- ggplotly(gdp_incumbent_graph, tooltip = c("label", "pv"))
+
+# saveWidget(gdp_incumbent_graph_plotly, "gdp_incumbent_pv_plot.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
 
 ```{r local model}
 
+# Looking to see if the local economy is a better predictor for battleground states
+
 local_model_data <- popvote_state %>% 
   left_join(popvote, by = "year") %>% 
-  filter(incumbent_party == TRUE) %>% 
+  filter(incumbent == TRUE) %>% 
   left_join(local, by = c("state" = "state_and_area", "year")) %>% 
-  filter(month == "07",
-         state %in% c("Florida", "Ohio", "Maine", "North Carolina", "Georgia", "Pennsylvania"))
+  filter(month == "05",
+         state %in% c("Florida", "Ohio", "Maine", "North Carolina", "Georgia", "Pennsylvania")) %>% 
+  mutate(pv2p = case_when(
+    party == "republican" ~ R_pv2p,
+    party == "democrat" ~ D_pv2p
+  ))
 
-local_model <- lm(data = local_model_data, pv ~ state:unemployed_prce)
+# Creating our model
+
+local_model <- lm(data = local_model_data, pv2p ~ state:unemployed_prce)
 summ(local_model)
 
-```
+# Predicting for 2020
 
+local_2020 <- local %>% 
+  filter(year == 2020,
+         state_and_area %in% c("Florida", "Ohio", "Maine", "North Carolina", "Georgia", "Pennsylvania"),
+         month == "05") %>% 
+  rename(state = state_and_area) %>% 
+  select(state, unemployed_prce)
 
-```{r local plotly}
+# Predicting 2020 pv using the the model and putting it in a nice table. I
+# divide each number by 100 to format them as percentages in the tables/graphs.
 
-# Code below is taken from Plotly's Cloropleth County Maps example:
-# https://plotly.com/r/mapbox-county-choropleth/
+pred_2020 <- local_2020 %>% 
+  mutate(unemployed_prce = unemployed_prce / 100,
+         pv2p = predict(local_model, local_2020) / 100,
+         lower = predict(local_model, local_2020, interval = "prediction")[,2] / 100,
+         upper = predict(local_model, local_2020, interval = "prediction")[,3] / 100)
 
-url <- 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
-counties <- rjson::fromJSON(file=url)
-url2<- "https://raw.githubusercontent.com/plotly/datasets/master/fips-unemp-16.csv"
-df <- read.csv(url2, colClasses=c(fips="character"))
-fig <- plot_ly() 
-fig <- fig %>% add_trace(
-    type="choroplethmapbox",
-    geojson=counties,
-    locations=df$fips,
-    z=df$unemp,
-    colorscale="Viridis",
-    zmin=0,
-    zmax=12,
-    marker=list(line=list(
-      width=0),
-      opacity=0.5
-    )
-  )
-fig <- fig %>% layout(
-    mapbox=list(
-      style="carto-positron",
-      zoom =2,
-      center=list(lon= -95.71, lat=37.09))
-  )
-fig
+# Table for 2020 Prediction Results
+
+local_2020_table <- reactable(
+  pred_2020, 
+  columns = list(
+    state = colDef(name = "State"),
+    unemployed_prce = colDef(name = "Unemployed Percent", format = colFormat(percent = TRUE, digits = 2)),
+    pv2p = colDef(name = "Estimated Two Party Popular Vote", format = colFormat(percent = TRUE, digits = 2)),
+    lower = colDef(name = "2.5% CI", format = colFormat(percent = TRUE, digits = 2)),
+    upper = colDef(name = "97.5% CI", format = colFormat(percent = TRUE, digits = 2))),
+  defaultColDef = colDef(
+    align = "center",
+    minWidth = 70,
+    headerStyle = list(background = "#f7f7f8")
+  ),
+  bordered = TRUE,
+  highlight = TRUE)
+
+# saveWidget(local_2020_table, "local_table.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
