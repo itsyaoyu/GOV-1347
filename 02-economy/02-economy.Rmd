@@ -227,51 +227,27 @@ local_model_data <- popvote_state %>%
          state %in% c("Florida", "Ohio", "Maine", "North Carolina", "Georgia", "Pennsylvania")) %>% 
   mutate(pv2p = case_when(
     party == "republican" ~ R_pv2p,
-    party == "democrat" ~ D_pv2p
-  ))
+    party == "democrat" ~ D_pv2p),
+    `Two Party Popular Vote` = round(pv2p / 100, digits = 2),
+    `Unemployment Percent` = unemployed_prce / 100)
 
-# Creating our model
+# Plotting a graph to see the trends
 
-local_model <- lm(data = local_model_data, pv2p ~ state:unemployed_prce)
-summ(local_model)
+trends_plot <- local_model_data %>% 
+  ggplot(aes(x = `Unemployment Percent`, y = `Two Party Popular Vote`, label = candidate)) + 
+  geom_point() + 
+  facet_wrap("state") + 
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  theme_classic() +
+  labs(title = "Trends between Unemployment Percent and Two Party Popular Vote",
+       x = "Unemployment Percent",
+       y = "Two Party Popular Vote") +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1))
 
-# Predicting for 2020
+trends_ggplot <- ggplotly(trends_plot, tooltip = c("Two Party Popular Vote", "Unemployment Percent", "label"))
 
-local_2020 <- local %>% 
-  filter(year == 2020,
-         state_and_area %in% c("Florida", "Ohio", "Maine", "North Carolina", "Georgia", "Pennsylvania"),
-         month == "05") %>% 
-  rename(state = state_and_area) %>% 
-  select(state, unemployed_prce)
-
-# Predicting 2020 pv using the the model and putting it in a nice table. I
-# divide each number by 100 to format them as percentages in the tables/graphs.
-
-pred_2020 <- local_2020 %>% 
-  mutate(unemployed_prce = unemployed_prce / 100,
-         pv2p = predict(local_model, local_2020) / 100,
-         lower = predict(local_model, local_2020, interval = "prediction")[,2] / 100,
-         upper = predict(local_model, local_2020, interval = "prediction")[,3] / 100)
-
-# Table for 2020 Prediction Results
-
-local_2020_table <- reactable(
-  pred_2020, 
-  columns = list(
-    state = colDef(name = "State"),
-    unemployed_prce = colDef(name = "Unemployed Percent", format = colFormat(percent = TRUE, digits = 2)),
-    pv2p = colDef(name = "Estimated Two Party Popular Vote", format = colFormat(percent = TRUE, digits = 2)),
-    lower = colDef(name = "2.5% CI", format = colFormat(percent = TRUE, digits = 2)),
-    upper = colDef(name = "97.5% CI", format = colFormat(percent = TRUE, digits = 2))),
-  defaultColDef = colDef(
-    align = "center",
-    minWidth = 70,
-    headerStyle = list(background = "#f7f7f8")
-  ),
-  bordered = TRUE,
-  highlight = TRUE)
-
-# saveWidget(local_2020_table, "local_table.html", selfcontained = FALSE, libdir = "lib")
+# saveWidget(trends_ggplot, "local_trends.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
