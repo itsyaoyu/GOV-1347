@@ -7,3 +7,5 @@ Code, data, and figures used in my GOV 1347 Election Analytics Blog posts for th
 1. [Introduction](https://itsyaoyu.com/blog/gov-1347-introduction/)
 
 2. [The Economy](https://itsyaoyu.com/blog/gov-1347-the-economy/)
+
+3. [Polls](https://itsyaoyu.com/blog/gov-1347-polls/)
