@@ -1,0 +1,113 @@
+---
+title: "03-Polling"
+author: "Yao Yu"
+date: "9/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in necessary packages
+
+library(tidyverse)
+library(reactable)
+library(plotly)
+library(scales)
+library(htmlwidgets)
+
+# Loading in the data
+
+poll_2016 <- read_csv("../data/03-polling/polls_2016.csv")
+poll_2020 <- read_csv("../data/03-polling/polls_2020.csv")
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
+```
+
+```{r comparing polls}
+
+# Getting the 201
+
+popvote_2016 <- popvote %>% 
+  filter(year == 2016) %>% 
+  select(candidate, pv) %>% 
+  mutate(candidate = ifelse(candidate == "Clinton, Hillary", "clinton", "trump"),
+         pv = pv / 100) %>% 
+  pivot_wider(names_from = candidate, values_from = pv) %>% 
+  mutate(grade = "Actual",
+         clinton_sd = 0,
+         trump_sd = 0) %>% 
+  select(grade, clinton, clinton_sd, trump, trump_sd)
+
+grade_order <- c(2, 3, 1, 5, 6, 4, 8, 7, 9, 0)
+
+avg_by_grade_2016 <- poll_2016 %>%
+  filter(state == "U.S.") %>% 
+  filter(startdate >= as.Date.character("6/1/2016")) %>% 
+  filter(!grepl("2015$", startdate)) %>% 
+  mutate(rawpoll_clinton = rawpoll_clinton / 100,
+         rawpoll_trump = rawpoll_trump / 100) %>% 
+  group_by(grade) %>% 
+  summarize(clinton = mean(rawpoll_clinton),
+            clinton_sd = sd(rawpoll_clinton),
+            trump = mean(rawpoll_trump),
+            trump_sd = sd(rawpoll_trump),
+            .groups = "drop_last") %>% 
+  rbind(popvote_2016) %>% 
+  mutate(order = grade_order) %>% 
+  arrange(order) %>% 
+  select(-order) %>% 
+  mutate(grade = ifelse(is.na(grade), "NA", grade))
+
+# Table for Poll Averages by Grade
+
+avg_by_grade_2016_table <- reactable(
+  avg_by_grade_2016, 
+  columns = list(
+    grade = colDef(name = "Grade"),
+    clinton = colDef(name = "Clinton", format = colFormat(percent = TRUE, digits = 2)),
+    clinton_sd = colDef(name = "Clinton SD", format = colFormat(percent = TRUE, digits = 2)),
+    trump = colDef(name = "Trump", format = colFormat(percent = TRUE, digits = 2)),
+    trump_sd = colDef(name = "Trump SD", format = colFormat(percent = TRUE, digits = 2))),
+  defaultColDef = colDef(
+    align = "center",
+    minWidth = 70,
+    headerStyle = list(background = "#f7f7f8")
+  ),
+  bordered = TRUE,
+  highlight = TRUE)
+
+poll_2016_graph <- poll_2016 %>%
+  filter(state == "U.S.") %>% 
+  filter(startdate >= as.Date.character("6/1/2016")) %>% 
+  filter(!grepl("2015$", startdate)) %>% 
+  mutate(rawpoll_clinton = rawpoll_clinton / 100,
+         rawpoll_trump = rawpoll_trump / 100) %>% 
+  select(startdate, grade, pollster, samplesize, rawpoll_clinton, rawpoll_trump) %>% 
+  pivot_longer(rawpoll_clinton:rawpoll_trump, names_to = "candidate", values_to = "popvote") %>% 
+  mutate(startdate = as.Date(startdate, "%m/%d/%Y"),
+         candidate = ifelse(candidate == "rawpoll_clinton", "Clinton", "Trump")) %>% 
+  ggplot(aes(x = startdate, y = popvote, color = fct_relevel(candidate, "Trump", "Clinton"), label = grade)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(title = "2016 Presidential Polls from June to November",
+       x = "",
+       y = "Popular Vote",
+       color = "") +
+  scale_y_continuous(labels = percent_format(accuracy = 1))
+
+# Plotting the data using plotly
+  
+poll_2016_graph_plotly <- ggplotly(avg_by_grade_2016_graph, tooltip = c("grade", "popvote"))
+
+# Saving the plot to be imported into the blog
+
+# saveWidget(poll_2016_graph_plotly, "poll_2016_graph_plotly.html", selfcontained = FALSE, libdir = "lib")
+```
+
+```{r predicting 2020}
+
+
+
+```
+
