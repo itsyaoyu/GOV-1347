@@ -25,7 +25,7 @@ popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
 
 ```{r comparing polls}
 
-# Getting the 201
+# Getting the 2016 popular vote
 
 popvote_2016 <- popvote %>% 
   filter(year == 2016) %>% 
@@ -38,7 +38,11 @@ popvote_2016 <- popvote %>%
          trump_sd = 0) %>% 
   select(grade, clinton, clinton_sd, trump, trump_sd)
 
+# Setting table ordering
+
 grade_order <- c(2, 3, 1, 5, 6, 4, 8, 7, 9, 0)
+
+# Polls by grade
 
 avg_by_grade_2016 <- poll_2016 %>%
   filter(state == "U.S.") %>% 
@@ -76,6 +80,12 @@ avg_by_grade_2016_table <- reactable(
   bordered = TRUE,
   highlight = TRUE)
 
+# Saving table
+
+# saveWidget(avg_by_grade_2016_table, "avg_by_grade_2016_table.html", selfcontained = FALSE, libdir = "lib")
+
+# Graph of the 2016 polls in general
+
 poll_2016_graph <- poll_2016 %>%
   filter(state == "U.S.") %>% 
   filter(startdate >= as.Date.character("6/1/2016")) %>% 
@@ -98,16 +108,48 @@ poll_2016_graph <- poll_2016 %>%
 
 # Plotting the data using plotly
   
-poll_2016_graph_plotly <- ggplotly(avg_by_grade_2016_graph, tooltip = c("grade", "popvote"))
+poll_2016_graph_plotly <- ggplotly(poll_2016_graph, tooltip = c("grade", "popvote"))
 
 # Saving the plot to be imported into the blog
 
 # saveWidget(poll_2016_graph_plotly, "poll_2016_graph_plotly.html", selfcontained = FALSE, libdir = "lib")
 ```
 
-```{r predicting 2020}
+```{r 2020 polls graph}
 
+# Graph of the 2020 polls in general
 
+poll_2020_graph <- poll_2020 %>%
+  filter(office_type == "U.S. President") %>% 
+  filter(is.na(state)) %>% 
+  filter(answer %in% c("Biden", "Trump")) %>% 
+  filter(start_date >= as.Date.character("6/1/20")) %>% 
+  filter(!grepl("19$", start_date)) %>% 
+  filter(!grepl("18$", start_date)) %>%
+  select(pollster, start_date, answer, pct, fte_grade) %>% 
+  rename(
+    grade = fte_grade,
+    popvote = pct,
+  ) %>% 
+  mutate(popvote = popvote / 100) %>% 
+  mutate(start_date = as.Date(start_date, "%m/%d/%y")) %>% 
+  ggplot(aes(x = start_date, y = popvote, color = fct_relevel(answer, "Trump", "Biden"), label = grade)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(title = "2020 Presidential Polls from June to Present",
+       x = "",
+       y = "Popular Vote",
+       color = "") +
+  scale_y_continuous(labels = percent_format(accuracy = 1))
+
+# Plotting the data using plotly
+
+poll_2020_graph_plotly <- ggplotly(poll_2020_graph, tooltip = c("grade", "popvote"))
+
+# Saving the plot to be imported into the blog
+
+# saveWidget(poll_2020_graph_plotly, "poll_2020_graph_plotly.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
