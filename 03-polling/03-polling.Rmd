@@ -15,12 +15,16 @@ library(reactable)
 library(plotly)
 library(scales)
 library(htmlwidgets)
+library(jtools)
+library(kableExtra)
 
 # Loading in the data
 
 poll_2016 <- read_csv("../data/03-polling/polls_2016.csv")
 poll_2020 <- read_csv("../data/03-polling/polls_2020.csv")
 popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
+state_polls <- read_csv("../data/03-polling/pollavg_bystate_1968-2016.csv")
+economy <- read_csv("../data/02-economy/econ.csv")
 ```
 
 ```{r comparing polls}
@@ -150,6 +154,91 @@ poll_2020_graph_plotly <- ggplotly(poll_2020_graph, tooltip = c("grade", "popvot
 # Saving the plot to be imported into the blog
 
 # saveWidget(poll_2020_graph_plotly, "poll_2020_graph_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
+```{r state model}
+
+# Setting seed for replicability
+
+set.seed(1347)
+
+# Gathering all the data for the model
+
+state_data <- state_polls %>% 
+  filter(state %in% c("Florida")) %>% 
+  filter(weeks_left <= 20) %>% 
+  left_join(popvote, by = c("year", "party")) %>% 
+  left_join(economy %>% filter(quarter == 2), by = "year") %>% 
+  mutate(id = row_number())
+
+# Splitting the data into a test/train set
+
+train <- state_data %>% 
+  sample_frac(0.75)
+
+test <- state_data %>% 
+  anti_join(train, by = "id")
+
+# Building the model using train data
+
+model_incumbent <- lm(pv ~ avg_poll + GDP_growth_qt, data = train %>% filter(incumbent == TRUE))
+model_challenger <- lm(pv ~ avg_poll + GDP_growth_qt, data = train %>% filter(incumbent == FALSE))
+
+# Looking at the models
+
+summ(model_incumbent)
+summ(model_challenger)
+
+# Determining the accuracy of these models
+
+test_pred <- test %>% 
+  mutate(pred_incumbent = predict(model_incumbent, test),
+         pred_challenger = predict(model_challenger, test),
+         pred_winner = case_when(
+           pred_incumbent > pred_challenger ~ incumbent,
+           pred_incumbent < pred_challenger ~ !incumbent
+         ),
+         correct = pred_winner == incumbent) %>% 
+  summarize(correct = mean(correct)) %>% 
+  mutate(incorrect = 1 - correct)
+
+state_data_pred <- state_data %>% 
+  mutate(pred_incumbent = predict(model_incumbent, state_data),
+         pred_challenger = predict(model_challenger, state_data),
+         pred_winner = case_when(
+           pred_incumbent > pred_challenger ~ incumbent,
+           pred_incumbent < pred_challenger ~ !incumbent
+         ),
+         correct = pred_winner == incumbent) %>% 
+  summarize(correct = mean(correct)) %>% 
+  mutate(incorrect = 1 - correct)
+
+# 2020 Prediction
+
+gdp_q2 <- economy %>% 
+  filter(year == 2020, quarter == 2) %>% 
+  select(GDP_growth_qt) %>% 
+  pull()
+
+florida_2020 <- poll_2020 %>% 
+  filter(state == "Florida") %>% 
+  filter(office_type == "U.S. President") %>% 
+  filter(answer %in% c("Biden", "Trump")) %>% 
+  filter(!grepl("19$", start_date)) %>% 
+  filter(!grepl("18$", start_date)) %>% 
+  mutate(start_date = as.Date(start_date, "%m/%d/%y")) %>% 
+  filter(start_date >= as.Date.character("2020-06-01")) %>% 
+  group_by(answer) %>% 
+  summarize(avg_poll = mean(pct), .groups = "drop_last") %>% 
+  mutate(incumbent = c(FALSE, TRUE),
+         GDP_growth_qt = gdp_q2)
+
+florida_2020 <- florida_2020 %>% 
+  mutate(pred = case_when(
+    incumbent == TRUE ~ predict(model_incumbent, florida_2020),
+    incumbent == FALSE ~ predict(model_challenger, florida_2020)
+  ))
 
 ```
 
