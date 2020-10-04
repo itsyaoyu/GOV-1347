@@ -25,6 +25,8 @@ library(kableExtra)
 ic_2017 <- read_csv("../data/04-incumbency/ic_2017_2019.csv") %>% 
   select(committee_name, contribution_receipt_date, contribution_receipt_amount) %>%
   arrange(contribution_receipt_date) %>% 
+  group_by(committee_name, contribution_receipt_date) %>% 
+  summarize(contribution_receipt_amount = sum(contribution_receipt_amount), .groups = "drop") %>% 
   group_by(committee_name) %>% 
   mutate(total = cumsum(contribution_receipt_amount),
          total = total / 1000000) %>% 
@@ -52,7 +54,7 @@ ic_2017_graph <- ic_2017 %>%
        x = "2017",
        y = "Cumulative Total (in Millions of $)")
 
-ic_2017_graph_plotly <- ggplotly(ic_2017_graph)
+ic_2017_graph_plotly <- ggplotly(ic_2017_graph, tooltip = c("date", "total"))
 
 # saveWidget(ic_2017_graph_plotly, "ic_2017_graph_plotly.html", selfcontained = FALSE, libdir = "lib")
 
