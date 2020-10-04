@@ -14,6 +14,8 @@ library(tidyverse)
 library(janitor)
 library(plotly)
 library(htmlwidgets)
+library(jtools)
+library(kableExtra)
 
 # Reading in data
 
@@ -26,6 +28,14 @@ trump_2016 <- read_csv("../data/04-incumbency/trump_2016_first_six_months.csv") 
   mutate(total = cumsum(contribution_receipt_amount),
          total = total / 1000000) %>% 
   rename(date = contribution_receipt_date)
+
+# This data is all for my model and the time for change model
+
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
+poll_2020 <- read_csv("../data/03-polling/polls_2020.csv")
+poll_avg <- read_csv("../data/03-polling/pollavg_1968-2016.csv")
+approval_gallup <- read_csv("../data/04-incumbency/approval_gallup_1941-2020.csv")
+econ <- read_csv("../data/02-economy/econ.csv")
 ```
 
 ```{r Trump 2016 donors}
@@ -43,6 +53,219 @@ trump_2016_graph <- trump_2016 %>%
 trump_2016_plotly <- ggplotly(trump_2016_graph)
 
 # saveWidget(trump_2016_plotly, "trump_2016_ic_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
+```{r my incumbency model}
+
+# Cleaning the data
+
+## I decide to filter for polls 22 weeks or less before the election and then
+## get the average of all those polls. This gets to the start of June.
+
+poll_avg_me <- poll_avg %>% 
+  filter(weeks_left <= 22) %>% 
+  group_by(year, party) %>% 
+  summarize(avg_poll = mean(avg_support), .groups = "drop")
+
+## For the gallup approval polls, I chose to look at polls starting from June of
+## election year up to election day. Then, I summarize to get the average job
+## approval
+
+approval_gallup_me <- approval_gallup %>% 
+  mutate(year = as.numeric(format(as.Date(poll_startdate, format = "%Y-%m-%d"), "%Y")),
+         month_day = format(as.Date(poll_startdate, format = "%Y-%m-%d"), "%m-%d")) %>% 
+  filter(year %% 4 == 0,
+         month_day > "06-01",
+         month_day < "11-03") %>% 
+  group_by(year) %>% 
+  summarize(job_approval = mean(approve))
+
+# Setting seed for replicability
+
+set.seed(1347)
+
+# Joining all the datasets
+
+incumbent_model_data <- popvote %>% 
+  inner_join(poll_avg_me, by = c("year", "party")) %>% 
+  inner_join(approval_gallup_me, by = "year")
+
+# Separating 2016 for leave one out testing
+
+incumbent_model_data_no_2016 <- incumbent_model_data %>% 
+  filter(year != 2016)
+
+incumbent_model_data_2016 <- incumbent_model_data %>% 
+  filter(year == 2016)
+
+# Creating the models
+
+model_poll <- lm(pv2p ~ avg_poll, data = incumbent_model_data_no_2016)
+model_poll_incumbent <- lm(pv2p ~ avg_poll + incumbent, data = incumbent_model_data_no_2016)
+model_poll_job_approval <- lm(pv2p ~ avg_poll + job_approval, data = incumbent_model_data_no_2016)
+model_all <- lm(pv2p ~ avg_poll + incumbent*job_approval, data = incumbent_model_data_no_2016)
+
+# Evaluating the models
+
+summ(model_poll)
+summ(model_poll_incumbent)
+summ(model_poll_job_approval)
+summ(model_all)
+```
+
+```{r time for change model}
+
+# Time for change model data
+
+tfc_df <- popvote %>%
+  filter(incumbent_party) %>%
+  select(year, candidate, party, pv, pv2p, incumbent) %>%
+  inner_join(
+    approval_gallup %>% 
+      group_by(year, president) %>% 
+      slice(1) %>% 
+      mutate(net_approve=approve-disapprove) %>%
+      select(year, incumbent_pres=president, net_approve, poll_enddate),
+    by="year"
+  ) %>%
+  inner_join(
+    econ %>%
+      filter(quarter == 2) %>%
+      select(GDP_growth_qt, year),
+    by="year"
+  )
+
+# Removing 2016 for loo validation
+
+tfc_no_2016 <- tfc_df %>% 
+  filter(year != 2016)
+
+tfc_2016 <- tfc_df %>% 
+  filter(year == 2016)
+
+# Model
+
+model_tfc <- lm(pv2p ~ GDP_growth_qt + net_approve + incumbent, data = tfc_no_2016)
+
+# Looking at model
+
+summ(model_tfc)
+
+```
+
+```{r model table and graph}
+
+# Model table
+
+export_summs(model_poll, model_poll_incumbent, model_poll_job_approval, model_all, model_tfc,
+             model.names = c("Model 1", "Model 2", "Model 3", "Model 4", "TFC"),
+             coefs = c("Intercept" = "(Intercept)", 
+                       "Average Poll" = "avg_poll", 
+                       "Incumbent" = "incumbentTRUE", 
+                       "Job Approval (Me)" = "job_approval",
+                       "Incumbent:Job Approval (Me)" = "incumbentTRUE:job_approval",
+                       "Election Year Q2 GDP Growth" = "GDP_growth_qt",
+                       "Job Approval (TFC)" = "net_approve"),
+             statistics = c(N = "nobs",
+                            R2 = "r.squared",
+                            R2.adj = "adj.r.squared",
+                            logLik = "logLik"))
+
+# Looking at Model 4 and TFC Model specifically
+
+summs_plot <- plot_summs(model_all, model_tfc, scale = TRUE, plot.distributions = TRUE,
+           model.names = c("Model 4", "TFC"),
+           coefs = c("Average Poll" = "avg_poll", 
+                     "Incumbent" = "incumbentTRUE", 
+                     "Job Approval (Me)" = "job_approval",
+                     "Incumbent:Job Approval (Me)" = "incumbentTRUE:job_approval",
+                     "Election Year Q2 GDP Growth" = "GDP_growth_qt",
+                     "Job Approval (TFC)" = "net_approve"))
+
+# saving plot
+
+#png("model_comparison.png", units="in", width=8, height=5, res=300)
+#print(summs_plot)
+#dev.off()
+
+```
+
+```{r predicting 2016 and 2020}
+
+# 2016 predictions
+
+# TFC prediction for Clinton
+
+tfc_2016_pred <- tfc_2016 %>% 
+  mutate(pred = predict(model_tfc, tfc_2016))
+
+tfc_2016_pred
+
+# prediction using my model 4. I scaled the final prediction so they would add up
+# 100 and be easier to interpret
+
+incumbent_model_data_2016_pred <- incumbent_model_data_2016 %>% 
+  mutate(pred = predict(model_all, incumbent_model_data_2016)) %>% 
+  mutate(pred_scaled = pred / sum(pred) * 100)
+
+incumbent_model_data_2016_pred
+
+# 2020
+
+# cleaning data for my prediction
+
+data_2020 <- poll_2020 %>%
+  filter(office_type == "U.S. President") %>% 
+  filter(is.na(state)) %>% 
+  filter(answer %in% c("Biden", "Trump")) %>% 
+  filter(start_date >= as.Date.character("6/1/20")) %>% 
+  filter(!grepl("19$", start_date)) %>% 
+  filter(!grepl("18$", start_date)) %>%
+  select(pollster, start_date, answer, pct, fte_grade) %>% 
+  rename(
+    grade = fte_grade,
+    popvote = pct,
+  ) %>% 
+  group_by(answer) %>% 
+  summarize(avg_poll_pv = mean(popvote), .groups = "drop") %>% 
+  mutate(avg_poll = avg_poll_pv / sum(avg_poll_pv) * 100) %>% 
+  select(-avg_poll_pv) %>% 
+  mutate(incumbent = ifelse(answer == "Biden", FALSE, TRUE),
+         year = 2020) %>% 
+  left_join(approval_gallup_me, by = "year")
+
+# My prediction, scaling once again
+  
+pred_2020 <- data_2020 %>% 
+  mutate(pred = predict(model_all, data_2020)) %>% 
+  mutate(pred_scaled = pred / sum(pred) * 100)
+
+pred_2020
+
+# TFC prediction for Trump.
+
+tfc_2020_data <- tibble(year = 2020) %>% 
+  inner_join(
+    approval_gallup %>% 
+      group_by(year, president) %>% 
+      slice(1) %>% 
+      mutate(net_approve=approve-disapprove) %>%
+      select(year, incumbent_pres=president, net_approve, poll_enddate),
+    by="year"
+  ) %>%
+  inner_join(
+    econ %>%
+      filter(quarter == 2) %>%
+      select(GDP_growth_qt, year),
+    by="year"
+  ) %>% 
+  mutate(incumbent = TRUE)
+
+tfc_2020_pred <- tfc_2020_data %>% 
+  mutate(pred = predict(model_tfc, tfc_2020_data))
+
+tfc_2020_pred
 
 ```
 
