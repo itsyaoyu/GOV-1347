@@ -29,8 +29,9 @@ ic_2017 <- read_csv("../data/04-incumbency/ic_2017_2019.csv") %>%
   summarize(contribution_receipt_amount = sum(contribution_receipt_amount), .groups = "drop") %>% 
   group_by(committee_name) %>% 
   mutate(total = cumsum(contribution_receipt_amount),
-         total = total / 1000000) %>% 
-  rename(date = contribution_receipt_date)
+         total = total / 1000000,
+         committee_name = ifelse(committee_name == "DONALD J. TRUMP FOR PRESIDENT, INC.", "Trump", "Biden")) %>% 
+  rename(date = contribution_receipt_date) 
 
 # This data is all for my model and the time for change model
 
@@ -46,12 +47,12 @@ econ <- read_csv("../data/02-economy/econ.csv")
 # Graphing FEC's ic from Jan 2017 to Jan 2019
 
 ic_2017_graph <- ic_2017 %>% 
-  ggplot(aes(x = date, y = total, color = fct_relevel(committee_name, "DONALD J. TRUMP FOR PRESIDENT, INC.", "BIDEN FOR PRESIDENT"))) + 
+  ggplot(aes(x = date, y = total, color = fct_relevel(committee_name, "Trump", "Biden"))) + 
   geom_line() + 
   theme_classic() +
   labs(title = "FEC Individual Contributions to Trump and Biden from Jan 2017 to Jan 2019",
        color = "",
-       x = "2017",
+       x = "",
        y = "Cumulative Total (in Millions of $)")
 
 ic_2017_graph_plotly <- ggplotly(ic_2017_graph, tooltip = c("date", "total"))
