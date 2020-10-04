@@ -47,7 +47,7 @@ trump_2016_graph <- trump_2016 %>%
   geom_line(color = "red") + 
   theme_classic() +
   labs(title = "First Six Months of Individual Contributions to Trump's Re-election Campaign",
-       x = "",
+       x = "2016",
        y = "Cumulative Total (in Millions of $)")
 
 trump_2016_plotly <- ggplotly(trump_2016_graph)
