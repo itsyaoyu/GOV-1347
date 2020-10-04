@@ -1,1 +1,2 @@
 *.csv filter=lfs diff=lfs merge=lfs -text
+ic_2017_graph_plotly.html filter=lfs diff=lfs merge=lfs -text
