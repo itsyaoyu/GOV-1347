@@ -13,6 +13,7 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(janitor)
 library(plotly)
+library(scales)
 library(htmlwidgets)
 library(jtools)
 library(kableExtra)
@@ -195,6 +196,41 @@ summs_plot <- plot_summs(model_all, model_tfc, scale = TRUE, plot.distributions 
 #dev.off()
 
 ```
+
+```{r model 4 results}
+
+# actual vs predicted graph of model 4
+
+actual_predicted <- incumbent_model_data %>% 
+  mutate(pred = predict(model_all, incumbent_model_data)) %>% 
+  group_by(year) %>% 
+  mutate(predicted = round(pred / sum(pred) * 100, digits = 2),
+         pv2p = round(pv2p, digits = 2),
+         winner = case_when(
+           winner == TRUE ~ "Win",
+           TRUE ~ "Loss"
+         )) %>% 
+  ungroup() %>% 
+  rename(actual = pv2p) %>% 
+  ggplot(aes(x = predicted, y = actual, color = fct_relevel(winner, "Win", "Loss"), label = year)) + 
+  geom_point() +
+  geom_abline(alpha = 0.5) +
+  theme_classic() +
+  scale_x_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(35, 65)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(35, 65)) +
+  labs(title = "Actual vs. Predicted Two-Party Popular Vote of Model 4",
+       color = "",
+       x = "Predicted",
+       y = "Actual")
+
+actual_predicted_plotly <- ggplotly(actual_predicted)
+
+# Saving plot
+
+# saveWidget(actual_predicted_plotly, "model_4_results.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
 
 ```{r predicting 2016 and 2020}
 
