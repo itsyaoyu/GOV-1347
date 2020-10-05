@@ -223,7 +223,7 @@ actual_predicted <- incumbent_model_data %>%
        x = "Predicted",
        y = "Actual")
 
-actual_predicted_plotly <- ggplotly(actual_predicted)
+actual_predicted_plotly <- ggplotly(actual_predicted, tooltip = c("predicted", "actual", "year"))
 
 # Saving plot
 
