@@ -206,24 +206,25 @@ actual_predicted <- incumbent_model_data %>%
   group_by(year) %>% 
   mutate(predicted = round(pred / sum(pred) * 100, digits = 2),
          pv2p = round(pv2p, digits = 2),
-         winner = case_when(
-           winner == TRUE ~ "Win",
-           TRUE ~ "Loss"
+         incumbent = case_when(
+           incumbent == TRUE ~ "Incumbent",
+           TRUE ~ "Challenger"
          )) %>% 
   ungroup() %>% 
+  filter(winner == TRUE) %>% 
   rename(actual = pv2p) %>% 
-  ggplot(aes(x = predicted, y = actual, color = fct_relevel(winner, "Win", "Loss"), label = year)) + 
+  ggplot(aes(x = predicted, y = actual, color = fct_relevel(incumbent, "Incumbent", "Challenger"), label = candidate)) + 
   geom_point() +
   geom_abline(alpha = 0.5) +
   theme_classic() +
-  scale_x_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(35, 65)) +
-  scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(35, 65)) +
-  labs(title = "Actual vs. Predicted Two-Party Popular Vote of Model 4",
+  scale_x_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(45, 65)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(45, 65)) +
+  labs(title = "Actual vs. Predicted Two-Party Popular Vote of Presidents using Model 4",
        color = "",
        x = "Predicted",
        y = "Actual")
 
-actual_predicted_plotly <- ggplotly(actual_predicted, tooltip = c("predicted", "actual", "year"))
+actual_predicted_plotly <- ggplotly(actual_predicted, tooltip = c("predicted", "actual", "candidate"))
 
 # Saving plot
 
