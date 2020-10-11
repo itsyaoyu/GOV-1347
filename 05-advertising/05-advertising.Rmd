@@ -11,7 +11,9 @@ knitr::opts_chunk$set(echo = FALSE)
 # Loading in necessary libraries
 
 library(tidyverse)
+library(plotly)
 library(statebins)
+library(htmlwidgets)
 
 # Reading in data
 
@@ -26,6 +28,47 @@ ad_campaigns <- read_csv("../data/05-advertising/ad_campaigns_2000-2012.csv")
 ad_2020 <- read_csv("../data/05-advertising/ads_2020.csv")
 vep <- read_csv("../data/05-advertising/vep_1980-2016.csv")
 ```
+
+```{r advertising graph}
+
+# Getting total amount spent per party on tv ads in the past
+
+ad_history_data <- ad_campaigns %>% 
+  group_by(party, cycle) %>% 
+  summarize(total = sum(total_cost), .groups = "drop") %>% 
+  mutate(total = total / 1000000) %>% 
+  rename(year = cycle) %>% 
+  mutate(party = ifelse(party == "democrat", "Democrat", "Republican"))
+
+# Getting total amount spent per party on tv ads in 2020
+
+ad_2020_data <- ad_2020 %>% 
+  pivot_longer(biden_airings:trump_airings, names_to = "party", values_to = "tv_ad_prop") %>% 
+  mutate(party = ifelse(party == "biden_airings", "democrat", "republican"),
+         year = 2020) %>% 
+  group_by(party, year) %>% 
+  summarize(total = sum(total_cost), .groups = "drop") %>% 
+    mutate(total = total / 1000000)
+
+# Creating graph of historical spending
+
+ad_history_plot <- ad_history_data %>% 
+  ggplot(aes(x = year, y = total, fill = fct_relevel(party, "Republican", "Democrat"))) +
+  geom_col(position = "dodge") + 
+  theme_classic() + 
+  labs(title = "Money Spent During Presidential Elections on TV Advertisements",
+       x = "",
+       y = "Dollars in Millions",
+       fill = "") + 
+  scale_x_continuous(breaks = c(2000, 2004, 2008, 2012)) +
+  scale_fill_manual(values=c("#F8766D", "#619CFF"), breaks = c("Republican", "Democrat"))
+
+ad_history_plotly <- ggplotly(ad_history_plot, tooltip = c("total"))
+
+# saveWidget(ad_history_plotly, "ad_history_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
 
 ```{r state voteshare}
 
@@ -117,6 +160,7 @@ model_data <- ad_old_dems %>%
          avg_poll = ifelse(is.na(avg_poll), avg_poll_national, avg_poll)) 
 
 # Creating a model prediction for each set of state data
+# NOTE: I had to remove many predictors from the model due to overfitting.
 
 state_models <- model_data %>% 
   group_by(state) %>% 
@@ -243,17 +287,16 @@ ec_plot_data <- final_2020 %>%
 
 ec_plot <- ec_plot_data %>% 
   ggplot(aes(x = "2020", y = total, fill = fct_relevel(win_pred, "Trump", "N/A", "Biden"), label = total)) +
-  geom_col(width = 0.25) + 
+  geom_col(show.legend = FALSE, width = 0.25) + 
   geom_text(position = position_stack(vjust = 0.5)) +
   coord_flip() + 
   theme_void() + 
-  theme(legend.position = "bottom") +
   labs(fill = "") +
   scale_fill_manual(values=c("#619CFF", "#CCCCCC", "#F8766D"), breaks = c("Biden", "N/A", "Trump"))
   
 # Saving plot as image
 
-# png("tv_ad_ec_bar.png", units="in", width=4, height=2, res=300)
+# png("tv_ad_ec_bar.png", units="in", width=6, height=1.5, res=100)
 # print(ec_plot)
 # dev.off()
 ```
