@@ -43,12 +43,13 @@ ad_history_data <- ad_campaigns %>%
 # Getting total amount spent per party on tv ads in 2020
 
 ad_2020_data <- ad_2020 %>% 
-  pivot_longer(biden_airings:trump_airings, names_to = "party", values_to = "tv_ad_prop") %>% 
+  pivot_longer(biden_airings:trump_airings, names_to = "party", values_to = "airings") %>% 
   mutate(party = ifelse(party == "biden_airings", "democrat", "republican"),
          year = 2020) %>% 
-  group_by(party, year) %>% 
+  filter(period_startdate != as.Date("2020-09-05", "%Y-%m-%d")) %>% 
+  group_by(year) %>% 
   summarize(total = sum(total_cost), .groups = "drop") %>% 
-    mutate(total = total / 1000000)
+  mutate(total = total / 1000000)
 
 # Creating graph of historical spending
 
