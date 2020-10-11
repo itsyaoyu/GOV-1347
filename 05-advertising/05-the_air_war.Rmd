@@ -1,5 +1,5 @@
 ---
-title: "05-The Air War"
+title: "05-Advertising"
 author: "Yao Yu"
 date: "10/9/2020"
 output: html_document
@@ -22,9 +22,9 @@ poll_2020 <- read_csv("../data/03-polling/polls_2020.csv")
 poll_avg <- read_csv("../data/03-polling/pollavg_1968-2016.csv")
 poll_avg_state <- read_csv("../data/03-polling/pollavg_bystate_1968-2016.csv")
 approval_gallup <- read_csv("../data/04-incumbency/approval_gallup_1941-2020.csv")
-ad_campaigns <- read_csv("../data/05-the_air_war/ad_campaigns_2000-2012.csv")
-ad_2020 <- read_csv("../data/05-the_air_war/ads_2020.csv")
-vep <- read_csv("../data/05-the_air_war/vep_1980-2016.csv")
+ad_campaigns <- read_csv("../data/05-advertising/ad_campaigns_2000-2012.csv")
+ad_2020 <- read_csv("../data/05-advertising/ads_2020.csv")
+vep <- read_csv("../data/05-advertising/vep_1980-2016.csv")
 ```
 
 ```{r state voteshare}
