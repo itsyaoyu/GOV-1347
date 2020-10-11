@@ -1,0 +1,260 @@
+---
+title: "05-The Air War"
+author: "Yao Yu"
+date: "10/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in necessary libraries
+
+library(tidyverse)
+library(statebins)
+
+# Reading in data
+
+ec <- read_csv("../data/01-introduction/ec_1952-2020.csv")
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
+popvote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv")
+poll_2020 <- read_csv("../data/03-polling/polls_2020.csv")
+poll_avg <- read_csv("../data/03-polling/pollavg_1968-2016.csv")
+poll_avg_state <- read_csv("../data/03-polling/pollavg_bystate_1968-2016.csv")
+approval_gallup <- read_csv("../data/04-incumbency/approval_gallup_1941-2020.csv")
+ad_campaigns <- read_csv("../data/05-the_air_war/ad_campaigns_2000-2012.csv")
+ad_2020 <- read_csv("../data/05-the_air_war/ads_2020.csv")
+vep <- read_csv("../data/05-the_air_war/vep_1980-2016.csv")
+```
+
+```{r state voteshare}
+
+# State and their abbreviations
+
+state_and_abb <- tibble(state = state.name,
+                        abb = state.abb)
+
+# Since the 2020 TV ad data we have is from 2020-04-09 to 2020-09-27, I am
+# filtering the historical data to match this time
+
+ad_old_adjusted <- ad_campaigns %>% 
+  mutate(month = as.numeric(format(air_date, "%m")),
+         day = as.numeric(format(air_date, "%d"))) %>%
+  filter(month >= 4,
+         day >= ifelse(month == 4, 9, 0),
+         month <= 9,
+         day <= ifelse(month == 9, 27, 31))
+
+# Calculating the proportion of TV ad money spent by Democrats per state per
+# election, filling in 0 for NA values (assuming no money spent)
+
+ad_old_dems <- ad_old_adjusted %>% 
+  group_by(party, cycle, state) %>% 
+  summarize(total = sum(total_cost), .groups = "drop") %>% 
+  pivot_wider(names_from = "party", values_from = "total") %>% 
+  mutate(democrat = ifelse(is.na(democrat), 0, democrat)) %>% 
+  mutate(republican = ifelse(is.na(republican), 0, republican)) %>% 
+  mutate(total = democrat + republican) %>% 
+  mutate(democrat = democrat / total,
+         republican = republican / total) %>% 
+  select(-total) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "tv_ad_prop") %>% 
+  rename(year = cycle,
+         abb = state)
+
+# Cleaning popvote, poll_avg, and approval_gallup using the same methods I used
+# in 04-incumbency (look very similar):
+
+## I decide to filter for polls 22 weeks or less before the election and then
+## get the average of all those polls. This gets to the start of June.
+
+poll_avg_state_me <- poll_avg_state %>% 
+  filter(weeks_left <= 22) %>% 
+  group_by(year, party, state) %>% 
+  summarize(avg_poll = mean(avg_poll), .groups = "drop")
+
+## For the gallup approval polls, I chose to look at polls starting from June of
+## election year up to election day. Then, I summarize to get the average job
+## approval
+
+approval_gallup_me <- approval_gallup %>% 
+  mutate(year = as.numeric(format(as.Date(poll_startdate, format = "%Y-%m-%d"), "%Y")),
+         month_day = format(as.Date(poll_startdate, format = "%Y-%m-%d"), "%m-%d")) %>% 
+  filter(year %% 4 == 0,
+         month_day > "06-01",
+         month_day < "11-03") %>% 
+  group_by(year) %>% 
+  summarize(job_approval = mean(approve), .groups = "drop")
+
+# Splitting popvote_state by party
+
+popvote_state_party <- popvote_state %>% 
+  pivot_longer(D:R, names_to = "party", values_to = "votes") %>% 
+  mutate(party = ifelse(party == "D", "democrat", "republican")) %>% 
+  select(year, state, party, votes) %>% 
+  left_join(popvote %>% 
+              select(year, party, incumbent), by = c("year", "party"))
+
+# Getting average national poll for every election split by party to substitute
+# NAs (also using same code as in 04-incumbency)
+
+poll_avg_me <- poll_avg %>% 
+  filter(weeks_left <= 22) %>% 
+  group_by(year, party) %>% 
+  summarize(avg_poll_national = mean(avg_support), .groups = "drop")
+
+# Joining all the datasets together and nesting by state. Filling in NAs with
+# national average polls for that year.
+
+model_data <- ad_old_dems %>% 
+  inner_join(state_and_abb, by = "abb") %>% 
+  left_join(popvote_state_party, by = c("state", "year", "party")) %>% 
+  left_join(poll_avg_state_me, by = c("year", "party", "state")) %>% 
+  left_join(approval_gallup_me, by = "year") %>% 
+  left_join(vep, by = c("year", "state")) %>% 
+  left_join(poll_avg_me, by = c("year", "party")) %>% 
+  mutate(poll_type = ifelse(is.na(avg_poll), "national", "local"),
+         avg_poll = ifelse(is.na(avg_poll), avg_poll_national, avg_poll)) 
+
+# Creating a model prediction for each set of state data
+
+state_models <- model_data %>% 
+  group_by(state) %>% 
+  group_nest() %>% 
+  mutate(data = map(data, ~unnest(., cols = c()))) %>% 
+  mutate(model = map(data, ~glm(cbind(votes, VEP-votes) ~ tv_ad_prop + party, 
+                 data = .x, family = binomial)))
+
+# Using the state models to predict for 2020
+
+# 1) Cleaning 2020 data
+
+# Calculating the proportion of TV ad money spent by Democrats per state per
+# election for 2020, filling in 0 for NA values (assuming no money spent)
+
+ad_2020_dems <- ad_2020 %>% 
+  mutate(biden_airings = biden_airings / total_airings,
+         trump_airings = trump_airings / total_airings) %>% 
+  pivot_longer(biden_airings:trump_airings, names_to = "party", values_to = "tv_ad_prop") %>% 
+  mutate(party = ifelse(party == "biden_airings", "democrat", "republican"),
+         year = 2020) %>% 
+  rename(abb = state) %>% 
+  filter(period_startdate != as.Date("2020-09-05", "%Y-%m-%d")) %>% 
+  select(year, abb, tv_ad_prop, party)
+
+# Getting the state level poll data
+
+poll_2020_clean <- poll_2020 %>% 
+  mutate(state = case_when(
+    state %in% c("Maine CD-1", "Maine CD-2") ~ "Maine",
+    state %in% c("Nebraska CD-1", "Nebraska CD-2") ~ "Nebraska",
+    is.na(state) ~ "National",
+    TRUE ~ state
+  )) %>% 
+  filter(answer %in% c("Biden", "Trump")) %>% 
+  filter(start_date >= as.Date.character("6/1/20")) %>% 
+  filter(!grepl("19$", start_date)) %>% 
+  filter(!grepl("18$", start_date)) %>% 
+  group_by(candidate_party, state) %>% 
+  summarize(avg_poll = mean(pct), .groups = "drop") %>% 
+  mutate(candidate_party = ifelse(candidate_party == "DEM", "democrat", "republican"),
+         year = 2020) %>% 
+  rename(party = candidate_party)
+
+poll_2020_national <- poll_2020_clean %>% 
+  filter(state == "National") %>% 
+  select(-state) %>% 
+  rename(nat_poll = avg_poll)
+
+# Joining all the data together (removing Kansas b/c of NaN values)
+
+pred_2020_data <- ad_2020_dems %>% 
+  inner_join(state_and_abb, by = "abb") %>% 
+  filter(state != "Kansas") %>% 
+  left_join(poll_2020_clean, by = c("state", "party", "year")) %>% 
+  left_join(poll_2020_national, by = c("year", "party")) %>% 
+  left_join(approval_gallup_me, by = "year") %>% 
+  mutate(poll_type = ifelse(is.na(avg_poll), "national", "local"),
+         avg_poll = ifelse(is.na(avg_poll), nat_poll, avg_poll),
+         incumbent = TRUE) %>% 
+  select(-nat_poll) %>% 
+  select(year, abb, party, tv_ad_prop, state, incumbent, avg_poll, job_approval, poll_type)
+
+pred_2020_results <- pred_2020_data %>% 
+  group_by(state) %>% 
+  group_nest() %>% 
+  mutate(data = map(data, ~unnest(., cols = c()))) %>% 
+  full_join(state_models, by = "state") %>% 
+  rename(new_data = data.x,
+         old_data = data.y) %>% 
+  drop_na() %>% 
+  mutate(pred = map(.x = model, .y = new_data, ~predict(.x, as.data.frame(.y))),
+         dem_pred = map_dbl(pred, ~pluck(., 1)),
+         rep_pred = map_dbl(pred, ~pluck(., 2)),
+         win_pred = ifelse(dem_pred > rep_pred, "Biden", "Trump"))
+  
+# Adding in electoral college to data
+
+ec_2020 <- ec %>% 
+  filter(year == 2020) %>% 
+  filter(state != "Total") %>% 
+  mutate(electors = ifelse(state == "D.C.", 1, electors)) %>% 
+  select(-year)
+
+# Pulling the final electoral results from known states and adding all states
+
+final_2020 <- pred_2020_results %>% 
+  full_join(ec_2020, by = "state") %>% 
+  mutate(win_pred = ifelse(is.na(win_pred), "N/A", win_pred),
+         state = ifelse(state == "D.C.", "District of Columbia", state)) %>% 
+  select(state, dem_pred, rep_pred, win_pred, electors)
+
+```
+
+```{r statebins plot of model predictions}
+
+# Map of prediction using statebins package
+
+statebin_map <- final_2020 %>% 
+  ggplot(aes(state = state, fill = fct_relevel(win_pred, "Trump", "N/A", "Biden"))) +
+  geom_statebins() +
+  theme_statebins() +
+  labs(title = "2020 Presidential Election Prediction Map",
+       subtitle = "using only TV advertisement data and party as predictors",
+       fill = "") +
+  scale_fill_manual(values=c("#619CFF", "#CCCCCC", "#F8766D"), breaks = c("Biden", "N/A", "Trump"))
+
+# Saving plot as image
+
+# png("tv_ad_map.png", units="in", width=7, height=5, res=300)
+# print(statebin_map)
+# dev.off()
+```
+
+```{r ploting electoral college bar}
+
+# Counting the total number of ec votes for each candidate
+
+ec_plot_data <- final_2020 %>% 
+  group_by(win_pred) %>% 
+  summarize(total = sum(electors), .groups = "drop")
+
+# Plot of the ec numbers (bar)
+
+ec_plot <- ec_plot_data %>% 
+  ggplot(aes(x = "2020", y = total, fill = fct_relevel(win_pred, "Trump", "N/A", "Biden"), label = total)) +
+  geom_col(width = 0.25) + 
+  geom_text(position = position_stack(vjust = 0.5)) +
+  coord_flip() + 
+  theme_void() + 
+  theme(legend.position = "bottom") +
+  labs(fill = "") +
+  scale_fill_manual(values=c("#619CFF", "#CCCCCC", "#F8766D"), breaks = c("Biden", "N/A", "Trump"))
+  
+# Saving plot as image
+
+# png("tv_ad_ec_bar.png", units="in", width=4, height=2, res=300)
+# print(ec_plot)
+# dev.off()
+```
+
