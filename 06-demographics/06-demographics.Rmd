@@ -1,0 +1,340 @@
+---
+title: "06-demographics"
+author: "Yao Yu"
+date: "10/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(caret)
+library(statebins)
+
+# State-level prediction
+
+ec <- read_csv("../data/01-introduction/ec_1952-2020.csv")
+demographics <- read_csv("../data/06-demographics/demographic_1990-2018.csv")
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
+pop_vote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv")
+poll_avg_state <- read_csv("../data/03-polling/pollavg_bystate_1968-2016.csv")
+poll_2020 <- read_csv("../data/03-polling/polls_2020.csv")
+vep <- read_csv("../data/05-advertising/vep_1980-2016.csv")
+
+# County-level prediction
+# County pop_vote: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/VOQCHQ
+# County demographic: https://data.nber.org/data/census-intercensal-county-population-age-sex-race-hispanic.html
+```
+
+```{r cleaning data and preparing for models}
+
+# Getting a tibble of state names and abbrev
+
+state_names <- tibble(abb = state.abb, state = state.name)
+
+# Cleaning the pop_vote_state data
+
+pop_vote_state_clean <- pop_vote_state %>% 
+  pivot_longer(R_pv2p:D_pv2p, names_to = "party", values_to = "pv2p_state") %>% 
+  mutate(party = ifelse(party == "D_pv2p", "democrat", "republican")) %>% 
+  select(-total, -D, -R)
+
+# Cleaning the poll_avg_state data, combining in Maine and Nebraska
+
+poll_avg_state_clean <- poll_avg_state %>% 
+  filter(weeks_left <= 22) %>% 
+  select(year, state, party, avg_poll) %>% 
+  mutate(state = case_when(
+    state %in% c("ME-1", "ME-2") ~ "Maine",
+    state %in% c("NE-1", "NE-2", "NE-3") ~ "Nebraska",
+    TRUE ~ state
+  )) %>% 
+  group_by(year, state, party) %>% 
+  summarize(avg_poll = mean(avg_poll), .groups = "drop")
+
+# Joining all the datasets together and also calculating demographics change
+
+state_model_data <- demographics %>% 
+  group_by(state) %>%
+  mutate(Asian_change = Asian - lag(Asian, order_by = year),
+         Black_change = Black - lag(Black, order_by = year),
+         Hispanic_change = Hispanic - lag(Hispanic, order_by = year),
+         Indigenous_change = Indigenous - lag(Indigenous, order_by = year),
+         White_change = White - lag(White, order_by = year),
+         Female_change = Female - lag(Female, order_by = year),
+         Male_change = Male - lag(Male, order_by = year),
+         age20_change = age20 - lag(age20, order_by = year),
+         age3045_change = age3045 - lag(age3045, order_by = year),
+         age4565_change = age4565 - lag(age4565, order_by = year),
+         age65_change = age65 - lag(age65, order_by = year)
+  ) %>% 
+  ungroup() %>% 
+  drop_na() %>% 
+  rename(abb = state) %>% 
+  left_join(state_names, by = "abb") %>% 
+  mutate(state = ifelse(abb == "DC", "District of Columbia", state)) %>% 
+  inner_join(popvote, by = "year") %>% 
+  select(-pv, -incumbent_party, -prev_admin, -pv2p, -winner) %>% 
+  inner_join(pop_vote_state_clean, by = c("state", "year", "party")) %>% 
+  inner_join(poll_avg_state_clean, by = c("year", "state", "party")) 
+
+```
+
+
+```{r predicting 2020 from avg_poll and incumbency, warning=FALSE, message=FALSE}
+
+# Setting warning and message to FALSE because of limited data throwing a
+# warning in my cross-validation. The main goal of using the caret package and
+# cross-validation was to learn how to use it for the future. The limited data
+# we are working with here doesn't really justify its use.
+
+# Creating the model, this time doing a 5-fold cross-validation using the caret
+# package. First time using the caret package, so apologies in advance if I'm
+# doing something wrong. Using average polls and incumbency to predict
+# pv2p_state. I plan on using this as a base model to compare my demographics
+# model to.
+
+state_models <- state_model_data %>% 
+  group_by(state, party) %>% 
+  group_nest() %>% 
+  mutate(data = map(data, ~unnest(., cols = c()))) %>% 
+  mutate(model = map(data, ~train(pv2p_state ~ avg_poll + incumbent, 
+                                data = .x, method = "lm",
+                                trControl = trainControl(
+                                  method = "cv", number = 5,
+                                  verboseIter = FALSE
+                                ))))
+
+# Getting the state level poll data.
+
+poll_2020_clean <- poll_2020 %>% 
+  mutate(state = case_when(
+    state %in% c("Maine CD-1", "Maine CD-2") ~ "Maine",
+    state %in% c("Nebraska CD-1", "Nebraska CD-2") ~ "Nebraska",
+    is.na(state) ~ "National",
+    TRUE ~ state
+  )) %>% 
+  filter(answer %in% c("Biden", "Trump")) %>% 
+  filter(start_date >= as.Date.character("6/1/20")) %>% 
+  filter(!grepl("19$", start_date)) %>% 
+  filter(!grepl("18$", start_date)) %>% 
+  group_by(candidate_party, state) %>% 
+  summarize(avg_poll = mean(pct), .groups = "drop") %>% 
+  mutate(candidate_party = ifelse(candidate_party == "DEM", "democrat", "republican")) %>% 
+  rename(party = candidate_party)
+
+# Getting the national level poll data for 2020
+
+poll_2020_national <- poll_2020 %>% 
+  filter(is.na(state)) %>% 
+  filter(answer %in% c("Biden", "Trump")) %>% 
+  filter(start_date >= as.Date.character("6/1/20")) %>% 
+  filter(!grepl("19$", start_date)) %>% 
+  filter(!grepl("18$", start_date)) %>% 
+  group_by(answer) %>% 
+  summarize(nat_poll = mean(pct), .groups = "drop") %>% 
+  mutate(total = sum(nat_poll)) %>% 
+  mutate(nat_poll = (nat_poll / total) * 100,
+         party = ifelse(answer == "Biden", "democrat", "republican")) %>% 
+  select(party, nat_poll) 
+
+# Joining the data for 2020 and making the prediction
+
+poll_2020_pred <- state_models %>% 
+  left_join(poll_2020_clean, by = c("state", "party")) %>% 
+  left_join(poll_2020_national, by = "party") %>% 
+  mutate(poll_type = ifelse(is.na(avg_poll), "National", "State"),
+         avg_poll = ifelse(is.na(avg_poll), nat_poll, avg_poll),
+         incumbent = ifelse(party == "republican", TRUE, FALSE)) %>% 
+  select(-data, -model, -nat_poll) %>% 
+  group_by(state, party) %>% 
+  group_nest() %>% 
+  mutate(data_2020 = map(data, ~unnest(., cols = c()))) %>% 
+  select(-data) %>% 
+  inner_join(state_models, by = c("state", "party")) %>% 
+  mutate(pred = map_dbl(.x = model, .y = data_2020, ~mean(predict.train(object = .x, newdata  = .y))),
+         poll_type = map_chr(.x = data_2020, ~unnest(., cols = c()) %>% pull(poll_type)))
+
+# Scaling the predictions to a 100% scale and then plotting them onto a map
+
+poll_2020_plot <- poll_2020_pred %>% 
+  select(state, party, pred, poll_type) %>% 
+  pivot_wider(names_from = "party", values_from = "pred") %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total,
+         republican = republican / total) %>% 
+  select(-total) %>% 
+  mutate(pred_win = ifelse(democrat > republican, 
+                           ifelse(poll_type == "State", "Biden-State", "Biden-National"), 
+                           ifelse(poll_type == "State", "Trump-State", "Trump-National"))) %>% 
+  ggplot(aes(state = state, fill = pred_win)) +
+  geom_statebins() + 
+  theme_statebins() +
+  scale_fill_manual(values=c("#619CFF", "#C3D7F7", "#F8766D", "#FACECA"), 
+                    breaks = c("Biden-State", "Biden-National", "Trump-State", "Trump-National")) +
+  labs(title = "2020 Presidential Election Prediction Map",
+       subtitle = "using a mix of State and National level polls and incumbency",
+       fill = "")
+
+# States with close margins: Colorado, Florida, Iowa, Nevada, New Hampshire, Ohio, Virginia, 
+
+# Saving plot as image
+
+# png("poll_2020_plot.png", units="in", width=7, height=5, res=300)
+# print(poll_2020_plot)
+# dev.off()
+
+```
+
+```{r ploting electoral college bar for poll map}
+
+# Counting the total number of ec votes for each candidate
+
+ec_plot_data <- poll_2020_pred %>% 
+  select(state, party, pred, poll_type) %>% 
+  pivot_wider(names_from = "party", values_from = "pred") %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total,
+         republican = republican / total) %>% 
+  select(-total) %>% 
+  mutate(pred_win = ifelse(democrat > republican, "Biden", "Trump")) %>% 
+  mutate(year = 2020) %>% 
+  left_join(ec, by = c("state", "year")) %>% 
+  mutate(electors = ifelse(state == "District of Columbia", 3, electors)) %>% 
+  group_by(pred_win) %>% 
+  summarize(total = sum(electors), .groups = "drop")
+
+# Plot of the ec numbers (bar)
+
+ec_plot <- ec_plot_data %>% 
+  ggplot(aes(x = "2020", y = total, fill = fct_relevel(pred_win, "Trump", "Biden"), label = total)) +
+  geom_col(show.legend = FALSE, width = 0.25) + 
+  geom_text(position = position_stack(vjust = 0.5)) +
+  coord_flip() + 
+  theme_void() + 
+  labs(fill = "") +
+  scale_fill_manual(values=c("#619CFF", "#F8766D"), breaks = c("Biden", "Trump"))
+  
+# Saving plot as image
+
+# png("poll_2020_ec.png", units="in", width=6, height=1.5, res=100)
+# print(ec_plot)
+# dev.off()
+
+```
+
+
+```{r demographics models, warning=FALSE, message=FALSE}
+
+# Same comment about warning and message to FALSE as above
+
+# Using demographic data to make prediction on pv2p_state
+
+state_demographic_models <- state_model_data %>% 
+  group_by(state, party) %>% 
+  group_nest() %>% 
+  mutate(data = map(data, ~unnest(., cols = c()))) %>% 
+  mutate(model = map(data, ~train(pv2p_state ~ Black_change + Hispanic_change + Asian_change, 
+                                data = .x, method = "lm",
+                                trControl = trainControl(
+                                  method = "cv", number = 5,
+                                  verboseIter = FALSE
+                                ))))
+
+# Using 2018 demographic data to make prediction on 2020
+
+demographic_2020 <- demographics %>% 
+  group_by(state) %>%
+  mutate(Asian_change = Asian - lag(Asian, order_by = year),
+         Black_change = Black - lag(Black, order_by = year),
+         Hispanic_change = Hispanic - lag(Hispanic, order_by = year),
+         Indigenous_change = Indigenous - lag(Indigenous, order_by = year),
+         White_change = White - lag(White, order_by = year),
+         Female_change = Female - lag(Female, order_by = year),
+         Male_change = Male - lag(Male, order_by = year),
+         age20_change = age20 - lag(age20, order_by = year),
+         age3045_change = age3045 - lag(age3045, order_by = year),
+         age4565_change = age4565 - lag(age4565, order_by = year),
+         age65_change = age65 - lag(age65, order_by = year)
+  ) %>% 
+  drop_na() %>% 
+  rename(abb = state) %>% 
+  left_join(state_names, by = "abb") %>% 
+  mutate(state = ifelse(abb == "DC", "District of Columbia", state)) %>% 
+  ungroup()
+
+# Joining in the models and making the prediction
+
+demographics_2020_pred <- demographic_2020 %>% 
+  group_by(state) %>% 
+  group_nest() %>% 
+  mutate(data_2020 = map(data, ~unnest(., cols = c()))) %>% 
+  select(-data) %>% 
+  inner_join(state_demographic_models, by = "state") %>% 
+  mutate(pred = map_dbl(.x = model, .y = data_2020, ~mean(predict.train(object = .x, newdata  = .y))))
+
+# Scaling the predictions to a 100% scale and then plotting them onto a map
+
+demographics_2020_plot <- demographics_2020_pred %>% 
+  select(state, party, pred) %>% 
+  pivot_wider(names_from = "party", values_from = "pred") %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total,
+         republican = republican / total) %>% 
+  select(-total) %>% 
+  mutate(pred_win = ifelse(democrat > republican, "Biden", "Trump")) %>% 
+  ggplot(aes(state = state, fill = pred_win)) +
+  geom_statebins() + 
+  theme_statebins() +
+  scale_fill_manual(values=c("#619CFF", "#F8766D"), 
+                    breaks = c("Biden","Trump")) +
+  labs(title = "2020 Presidential Election Prediction Map",
+       subtitle = "using demographic change in Black, Hispanic, and Asian Americans per state",
+       fill = "")
+
+# Saving plot as image
+
+png("demographics_2020_plot.png", units="in", width=7, height=5, res=300)
+print(demographics_2020_plot)
+dev.off()
+
+```
+
+```{r ploting electoral college bar for demographics map}
+
+# Counting the total number of ec votes for each candidate
+
+ec_plot_data <- demographics_2020_pred %>% 
+  select(state, party, pred) %>% 
+  pivot_wider(names_from = "party", values_from = "pred") %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total,
+         republican = republican / total) %>% 
+  select(-total) %>% 
+  mutate(pred_win = ifelse(democrat > republican, "Biden", "Trump")) %>% 
+  mutate(year = 2020) %>% 
+  left_join(ec, by = c("state", "year")) %>% 
+  mutate(electors = ifelse(state == "District of Columbia", 3, electors)) %>% 
+  group_by(pred_win) %>% 
+  summarize(total = sum(electors), .groups = "drop")
+
+# Plot of the ec numbers (bar)
+
+ec_plot <- ec_plot_data %>% 
+  ggplot(aes(x = "2020", y = total, fill = fct_relevel(pred_win, "Trump", "Biden"), label = total)) +
+  geom_col(show.legend = FALSE, width = 0.25) + 
+  geom_text(position = position_stack(vjust = 0.5)) +
+  coord_flip() + 
+  theme_void() + 
+  labs(fill = "") +
+  scale_fill_manual(values=c("#619CFF", "#F8766D"), breaks = c("Biden", "Trump"))
+  
+# Saving plot as image
+
+# png("demographics_2020_ec.png", units="in", width=6, height=1.5, res=100)
+# print(ec_plot)
+# dev.off()
+
+```
+
