@@ -13,3 +13,5 @@ Code, data, and figures used in my GOV 1347 Election Analytics Blog posts for th
 4. [Incumbency](https://itsyaoyu.com/blog/gov-1347-incumbency/)
 
 5. [Advertising](https://itsyaoyu.com/blog/gov-1347-advertising/)
+
+6. [Demographics](https://itsyaoyu.com/blog/gov-1347-demographics/)
