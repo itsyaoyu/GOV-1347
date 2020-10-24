@@ -1,0 +1,132 @@
+---
+title: "07-Shocks"
+author: "Yao Yu"
+date: "10/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in necessary packages
+
+library(tidyverse)
+library(plotly)
+
+# Loading in the data
+
+polls_2020 <- read_csv("../data/07-shocks/polls_2020.csv")
+approval <- read_csv("../data/07-shocks/trump_approval_polls.csv")
+covid <- read_csv("../data/07-shocks/covid_us.csv")
+```
+
+```{r eda, warning=FALSE}
+
+## NOTE: The NA values resulted from the graphs in this code chunk are a result
+## of some dates not having averages or dates before covid-tracking begun. I
+## decided to leave them in to show data from the whole year
+
+# Cleaning 2020 poll data, filtering for only 2020 polls and getting the average
+# poll by end date
+
+polls_2020_cleaned <- polls_2020 %>% 
+  filter(is.na(state)) %>% 
+  mutate(end_date = as.Date(end_date, "%m/%d/%y")) %>% 
+  filter(answer %in% c("Biden", "Trump"),
+         end_date >= as.Date("2020-01-01")) %>% 
+  group_by(end_date, answer) %>% 
+  summarize(avg_poll = mean(pct), .groups = "drop") 
+
+# Graphing polling averages over time 
+# (Not used in blog)
+
+polls_2020_cleaned %>% 
+  ggplot(aes(x = end_date, y = avg_poll, color = answer)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(title = "2020 Presidential General Poll Averages",
+       x = "2020",
+       y = "Popular Vote",
+       color = "",
+       caption = "Source: FiveThirtyEight") +
+  scale_color_manual(values=c("#619CFF", "#F8766D"), 
+                     breaks = c("Biden", "Trump"))
+
+# Cleaning covid data to get total number of new cases in all of US (had to
+# adjust the poll data numbers to fit the graph)
+
+covid_cleaned <- covid %>% 
+  group_by(date) %>% 
+  summarize(new_cases = sum(positiveIncrease), .groups = "drop") %>% 
+  full_join(polls_2020_cleaned, by = c("date" = "end_date")) %>% 
+  mutate(new_cases = (new_cases / 10000) + 42) %>% 
+  pivot_wider(names_from = "answer", values_from = "avg_poll") %>% 
+  select(-`NA`) %>% 
+  pivot_longer(new_cases:Trump, names_to = "measures", values_to = "values") %>% 
+  mutate(measures = ifelse(measures == "new_cases", "Confirmed Cases", measures))
+
+# Graphing covid data alongside poll data on the same graph 
+
+covid_cleaned %>% 
+  ggplot(aes(x = date, y = values, color = measures)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(title = "2020 Presidential General Polls and Daily Covid Cases Averages",
+       x = "2020",
+       color = "",
+       caption = "Source: FiveThirtyEight, The COVID Tracking Project") +
+  scale_y_continuous(
+    name = "Popular Vote",
+    sec.axis = sec_axis( trans=~(.-42)*10000, name="Daily Covid Cases")
+  ) +
+  scale_color_manual(values=c("#619CFF", "#F8766D", "#BABABA"), 
+                     breaks = c("Biden", "Trump", "Confirmed Cases")) +
+  theme_classic() +
+  theme(legend.position="bottom")
+
+# Adding in average approval rating to the previous plot. Things started getting
+# messy, so I removed poll average data from this plot (filtered out). I also
+# shifted the covid cases by 3 again to make the plot easier to read
+
+approval_cleaned <- approval %>% 
+  mutate(end_date = as.Date(end_date, "%m/%d/%y")) %>% 
+  filter(end_date >= as.Date("2020-01-01")) %>% 
+  pivot_longer(yes:no, names_to = "approve", values_to = "approval_rating") %>% 
+  group_by(end_date, approve) %>% 
+  summarize(approval_rating = mean(approval_rating),
+            .groups = "drop") %>% 
+  pivot_wider(names_from = "approve", values_from = "approval_rating") %>% 
+  full_join(covid_cleaned %>% 
+              mutate(values = ifelse(measures == "Confirmed Cases", values + 3, values)), by = c("end_date" = "date")) %>% 
+  pivot_wider(names_from = "measures", values_from = "values") %>% 
+  select(-`NA`) %>% 
+  pivot_longer(no:Trump, names_to = "measures", values_to = "values") %>% 
+  filter(!measures %in% c("Trump", "Biden")) %>% 
+  mutate(measures = case_when(
+    measures == "no" ~ "Disapprove",
+    measures == "yes" ~ "Approve",
+    TRUE ~ "Confirmed Cases"
+  ))
+
+# Creating the plot
+
+approval_cleaned %>% 
+  ggplot(aes(x = end_date, y = values, color = measures)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x) +
+  labs(title = "2020 Presidential Approval Rating and Daily Covid Cases Averages",
+       x = "2020",
+       color = "",
+       caption = "Source: FiveThirtyEight, The COVID Tracking Project") +
+  scale_y_continuous(
+    name = "Approval Rating",
+    sec.axis = sec_axis( trans=~(.-45)*10000, name="Daily Covid Cases")
+  ) +
+  scale_color_manual(values=c("#4DAC26", "#CA0020", "#BABABA"), 
+                     breaks = c("Approve", "Disapprove", "Confirmed Cases")) +
+  theme_classic() +
+  theme(legend.position="bottom")
+  
+```
+
