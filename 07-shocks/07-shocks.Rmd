@@ -8,16 +8,34 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 
+# Disabling scientific notation
+
+options(scipen=999)
+
 # Loading in necessary packages
 
 library(tidyverse)
+library(scales)
 library(plotly)
+library(statebins)
+library(caret)
+library(htmlwidgets)
 
-# Loading in the data
+# Data for covid graphs
 
 polls_2020 <- read_csv("../data/07-shocks/polls_2020.csv")
 approval <- read_csv("../data/07-shocks/trump_approval_polls.csv")
 covid <- read_csv("../data/07-shocks/covid_us.csv")
+
+# Additional data for state model
+
+polls_past <- read_csv("../data/03-polling/pollavg_bystate_1968-2016.csv")
+popvote <- read_csv("../data/01-introduction/popvote_1948-2016.csv")
+popvote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv")
+job_approval <- read_csv("../data/04-incumbency/approval_gallup_1941-2020.csv")
+
+# Additional data for 2020 prediction
+ec <- read_csv("../data/01-introduction/ec_1952-2020.csv")
 ```
 
 ```{r eda, warning=FALSE}
@@ -68,7 +86,7 @@ covid_cleaned <- covid %>%
 
 # Graphing covid data alongside poll data on the same graph 
 
-covid_cleaned %>% 
+polls_covid_plot <- covid_cleaned %>% 
   ggplot(aes(x = date, y = values, color = measures)) +
   geom_point() +
   geom_smooth(method = "lm", formula = y ~ x) +
@@ -78,12 +96,18 @@ covid_cleaned %>%
        caption = "Source: FiveThirtyEight, The COVID Tracking Project") +
   scale_y_continuous(
     name = "Popular Vote",
-    sec.axis = sec_axis( trans=~(.-42)*10000, name="Daily Covid Cases")
+    sec.axis = sec_axis(trans=~(.-42)*10000, name="Daily Covid Cases", breaks = c(0, 50000, 100000))
   ) +
   scale_color_manual(values=c("#619CFF", "#F8766D", "#BABABA"), 
                      breaks = c("Biden", "Trump", "Confirmed Cases")) +
   theme_classic() +
   theme(legend.position="bottom")
+
+# Saving plot as image
+
+# png("polls_covid_plot.png", units="in", width=7, height=5, res=300)
+# print(polls_covid_plot)
+# dev.off()
 
 # Adding in average approval rating to the previous plot. Things started getting
 # messy, so I removed poll average data from this plot (filtered out). I also
@@ -111,7 +135,7 @@ approval_cleaned <- approval %>%
 
 # Creating the plot
 
-approval_cleaned %>% 
+approval_covid_plot <- approval_cleaned %>% 
   ggplot(aes(x = end_date, y = values, color = measures)) +
   geom_point() +
   geom_smooth(method = "lm", formula = y ~ x) +
@@ -121,12 +145,281 @@ approval_cleaned %>%
        caption = "Source: FiveThirtyEight, The COVID Tracking Project") +
   scale_y_continuous(
     name = "Approval Rating",
-    sec.axis = sec_axis( trans=~(.-45)*10000, name="Daily Covid Cases")
+    sec.axis = sec_axis(trans=~(.-45)*10000, name="Daily Covid Cases", breaks = c(0, 50000, 100000))
   ) +
   scale_color_manual(values=c("#4DAC26", "#CA0020", "#BABABA"), 
                      breaks = c("Approve", "Disapprove", "Confirmed Cases")) +
   theme_classic() +
   theme(legend.position="bottom")
+
+# Saving plot as image
+
+# png("approval_covid_plot.png", units="in", width=7, height=5, res=300)
+# print(approval_covid_plot)
+# dev.off()
   
+```
+
+```{r state model data prep}
+
+# Cleaning the polls data to remove districts of states. Then averaging the data
+
+polls_past_clean <- polls_past %>% 
+  filter(weeks_left <= 22,
+         !state %in% c("ME-1", "ME-2", "NE-1", "NE-2", "NE-3")) %>% 
+  group_by(year, state, party) %>% 
+  summarize(avg_poll = mean(avg_poll), .groups = "drop")
+
+# Cleaning job approval to only include months between June to October inclusive
+# during election years. Then, I took the average by year.
+
+job_approval_clean <- job_approval %>% 
+  mutate(year = as.numeric(format(as.Date(poll_startdate, format = "%Y-%m-%d"), "%Y")),
+         month = as.numeric(format(as.Date(poll_startdate, format = "%Y-%m-%d"), "%m"))) %>% 
+  filter(year %% 4 == 0,
+         month %in% c(6, 7, 8, 9, 10)) %>% 
+  group_by(year) %>% 
+  summarize(job_approval = mean(approve), .groups = "drop")
+
+# Cleaning popvote data (joining popvote_state and popvote)
+
+popvote_state_clean <- popvote_state %>% 
+  left_join(popvote, by = "year") %>% 
+  select(state, year, R_pv2p, D_pv2p, party, candidate, incumbent)
+
+# Joining the data together for the model
+
+full_data <- polls_past_clean %>% 
+  inner_join(popvote_state_clean, by = c("state", "year", "party")) %>% 
+  inner_join(job_approval_clean, by = "year") %>% 
+  mutate(pv2p = case_when(
+    party == "democrat" ~ D_pv2p,
+    party == "republican" ~ R_pv2p,
+  )) %>% 
+  ungroup()
+
+```
+
+```{r basic state model}
+
+# Creating models for each individual state
+
+state_models <- full_data %>% 
+  group_by(state) %>% 
+  group_nest() %>% 
+  mutate(data = map(data, ~unnest(., cols = c()))) %>% 
+  mutate(model = map(data, ~lm(pv2p ~ avg_poll + incumbent*job_approval + party, 
+                               data = .x))) %>% 
+  select(-data)
+
+model_results <- state_models %>% 
+  mutate(r_squared = map_dbl(model, ~summary(.x)$r.squared))
+
+# Evaluating the model on every candidate and state
+
+all_predictions <- full_data %>% 
+  group_by(year, state, candidate) %>% 
+  nest() %>% 
+  inner_join(state_models, by = "state") %>% 
+  mutate(pred = map_dbl(.x = model, .y = data, ~predict(.x, as.data.frame(.y))))
+
+# Plotting the evaluations from above
+
+all_predictions %>% 
+  unnest(data) %>% 
+  mutate(win = ifelse(pred >= 50, TRUE, FALSE),
+         winner = ifelse(pv2p >= 50, TRUE, FALSE),
+         accuracy = winner == win) %>% 
+  filter(winner == TRUE) %>% 
+  ggplot(aes(x = pred, y = pv2p, color = accuracy)) +
+  geom_point() +
+  theme_classic() +
+  xlim(40, 100) +
+  ylim(40, 100) +
+  labs(
+    title = "Actual vs. Predicted Two-Party Vote Share",
+    x = "Predicted",
+    y = "Actual"
+  )
+```
+
+```{r model with loocv}
+
+# Creating models for each individual state
+
+state_models <- full_data %>% 
+  group_by(state) %>% 
+  group_nest() %>% 
+  mutate(data = map(data, ~unnest(., cols = c()))) %>% 
+  mutate(model = map(data, ~train(pv2p ~ avg_poll + incumbent*job_approval + party, 
+                               data = .x, method = "lm",
+                                trControl = trainControl(
+                                  method = "LOOCV")))) %>% 
+  select(-data) 
+
+model_results <- state_models %>% 
+  mutate(rmse = map_dbl(model, ~.x$results[,2]),
+         r_squared = map_dbl(model, ~.x$results[,3]),
+         mae = map_dbl(model, ~.x$results[,4]))
+
+# Evaluating the model on every candidate and state
+
+all_predictions <- full_data %>% 
+  group_by(year, state, candidate) %>% 
+  nest() %>% 
+  inner_join(state_models, by = "state") %>% 
+  mutate(pred = map_dbl(.x = model, .y = data, ~predict(.x, as.data.frame(.y)))) %>% 
+  ungroup() %>% 
+  select(-model)
+
+# Calculating winners for each state, scaling to 100-point scale
+
+pred_winners <- all_predictions %>% 
+  unnest(data) %>% 
+  select(year, state, party, pred) %>% 
+  group_by(year, state, party) %>% 
+  pivot_wider(names_from = party, values_from = pred) %>% 
+  ungroup() %>% 
+  mutate(total = democrat + republican) %>% 
+  mutate(democrat = (democrat / total) * 100,
+         republican = (republican / total) * 100) %>% 
+  select(-total) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "pred_scaled")
+
+# Plotting the evaluations from above
+
+pred_accuracy <- all_predictions %>% 
+  unnest(data) %>% 
+  left_join(pred_winners, by = c("year", "state", "party")) %>% 
+  mutate(win = ifelse(pred_scaled >= 50, TRUE, FALSE),
+         winner = ifelse(pv2p >= 50, TRUE, FALSE),
+         accuracy = ifelse(winner == win, "Correct", "Incorrect"),
+         pred_scaled = round(pred_scaled / 100, 4),
+         actual = round(pv2p / 100, 4),
+         candidate = paste(candidate, state, sep = "\nstate: ")) %>% 
+  ungroup()
+
+pred_accuracy_plot <- pred_accuracy %>% 
+  ggplot(aes(x = pred_scaled, y = actual, color = accuracy, label = candidate)) +
+  geom_point() +
+  geom_vline(xintercept = .5) +
+  geom_hline(yintercept = .5) +
+  theme_classic() +
+  labs(
+    title = "Model Results: Actual vs. Scaled-Predicted Two-Party Vote Share",
+    x = "Predicted",
+    y = "Actual",
+    color = ""
+  ) +
+  scale_x_continuous(labels = percent, limits = c(0, 1)) +
+  scale_y_continuous(labels = percent, limits = c(0, 1)) +
+  scale_color_manual(values=c("#4DAC26", "#CA0020"), 
+                     breaks = c("Correct", "Incorrect"))
+
+# Plotly graph of pred_accuracy
+
+pred_accuracy_plotly <- ggplotly(pred_accuracy_plot, tooltip = c("pred_scaled", "actual", "candidate"))
+
+# Saving plotly
+
+# saveWidget(pred_accuracy_plotly, "pred_accuracy_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+# Getting numbers to put in blog
+
+# Overall prediction accuracy
+
+pred_accuracy %>% 
+  mutate(accuracy = ifelse(accuracy == "Correct", 1, 0)) %>% 
+  summarize(prop = sum(accuracy) / n())
+
+# States with worst predictions and best predictions
+
+pred_accuracy %>% 
+  mutate(accuracy = ifelse(accuracy == "Correct", 1, 0)) %>% 
+  group_by(state) %>% 
+  summarize(prop = sum(accuracy) / n()) %>% 
+  arrange(prop)
+
+# Incorrect 2016 predictions - interestingly this model would've predicted a
+# 269-269 tie
+
+pred_accuracy %>% 
+  filter(year == 2016,
+         accuracy != "Correct") %>% 
+  count(state)
+
+```
+
+```{r 2020 prediction}
+
+# Cleaning 2020 poll data, taking the average for each state after June
+
+polls_2020_cleaned <- polls_2020 %>% 
+  filter(!is.na(state),
+         !state %in% c("Maine CD-1", "Maine CD-2", "Nebraska CD-1", "Nebraska CD-2")) %>% 
+  mutate(end_date = as.Date(end_date, "%m/%d/%y")) %>% 
+  filter(answer %in% c("Biden", "Trump"),
+         end_date >= as.Date("2020-06-01")) %>% 
+  group_by(state, answer) %>% 
+  summarize(avg_poll = mean(pct), .groups = "drop") %>% 
+  mutate(year = 2020,
+         incumbent = ifelse(answer == "Trump", TRUE, FALSE),
+         party = ifelse(answer == "Trump", "republican", "democrat")) %>% 
+  rename(candidate = answer)
+
+# Creating the full 2020 data
+
+full_2020 <- polls_2020_cleaned %>% 
+  inner_join(job_approval_clean, by = "year")
+
+# Making the predictions
+
+pred_2020 <- full_2020 %>% 
+  group_by(year, state, candidate) %>% 
+  nest() %>% 
+  inner_join(state_models, by = "state") %>% 
+  mutate(pred = map_dbl(.x = model, .y = data, ~predict(.x, as.data.frame(.y)))) %>% 
+  ungroup() %>% 
+  select(-model)
+
+# Scaling the predictions and calculating winner for each state
+
+pred_2020_scaled <- pred_2020 %>% 
+  unnest(data) %>% 
+  select(year, state, party, pred) %>% 
+  group_by(year, state, party) %>% 
+  pivot_wider(names_from = party, values_from = pred) %>% 
+  ungroup() %>% 
+  mutate(total = democrat + republican) %>% 
+  mutate(democrat = (democrat / total) * 100,
+         republican = (republican / total) * 100,
+         winner = ifelse(republican > democrat, "Trump", "Biden"),
+         win_margin = republican - democrat,
+         win_margin_group = case_when(
+           win_margin >= 5 ~ "Strong Trump",
+           win_margin >= 1 ~ "Lean Trump",
+           win_margin <= -5 ~ "Strong Biden",
+           win_margin <= -1 ~ "Lean Biden",
+           TRUE ~ "Toss-Up"
+         )) %>% 
+  select(state, winner, win_margin, win_margin_group)
+
+pred_2020_map <- pred_2020_scaled %>% 
+  ggplot(aes(state = state, 
+             fill = win_margin_group, 
+             name = "Predicted Win Margin")) +
+  geom_statebins() + 
+  theme_statebins() +
+  scale_fill_manual(values = c("#619CFF", "#C3D7F7", "#BABABA", "#FACECA", "#F8766D"),
+                    breaks = c("Strong Biden", "Lean Biden", "Toss-Up", "Lean Trump", "Strong Trump")) +
+  labs(title = "2020 Presidential Election Prediction Map",
+       fill = "")
+
+# Saving plot as image
+
+# png("pred_2020_map.png", units="in", width=7, height=5, res=300)
+# print(pred_2020_map)
+# dev.off()
+
 ```
 
