@@ -35,7 +35,9 @@ popvote_state <- read_csv("../data/01-introduction/popvote_bystate_1948-2016.csv
 job_approval <- read_csv("../data/04-incumbency/approval_gallup_1941-2020.csv")
 
 # Additional data for 2020 prediction
-ec <- read_csv("../data/01-introduction/ec_1952-2020.csv")
+ec <- read_csv("../data/01-introduction/ec_1952-2020.csv") %>% 
+  filter(year == 2020) %>% 
+  mutate(electors = ifelse(state == "D.C.", 1, electors))
 ```
 
 ```{r eda, warning=FALSE}
@@ -419,6 +421,32 @@ pred_2020_map <- pred_2020_scaled %>%
 
 # png("pred_2020_map.png", units="in", width=7, height=5, res=300)
 # print(pred_2020_map)
+# dev.off()
+
+# Creating the electoral college bar
+
+ec_plot_data <- pred_2020_scaled %>% 
+  mutate(state = ifelse(state == "District of Columbia", "D.C.", state)) %>% 
+  left_join(ec, by = "state") %>% 
+  group_by(win_margin_group) %>% 
+  summarize(total = sum(electors), .groups = "drop")
+
+# Plot of the ec numbers (bar)
+
+ec_plot <- ec_plot_data %>% 
+  ggplot(aes(x = "2020", y = total, fill = fct_relevel(win_margin_group, "Strong Trump", "Lean Trump", "Toss-Up", "Lean Biden", "Strong Biden"), label = total)) +
+  geom_col(show.legend = FALSE, width = 0.25) + 
+  geom_text(position = position_stack(vjust = 0.5)) +
+  coord_flip() + 
+  theme_void() + 
+  labs(fill = "") +
+  scale_fill_manual(values = c("#619CFF", "#C3D7F7", "#BABABA", "#FACECA", "#F8766D"),
+                    breaks = c("Strong Biden", "Lean Biden", "Toss-Up", "Lean Trump", "Strong Trump"))
+
+# Saving plot as image
+
+# png("pred_2020_ec_bar.png", units="in", width=6, height=1.5, res=100)
+# print(ec_plot)
 # dev.off()
 
 ```
