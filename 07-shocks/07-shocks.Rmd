@@ -399,9 +399,9 @@ pred_2020_scaled <- pred_2020 %>%
          win_margin = republican - democrat,
          win_margin_group = case_when(
            win_margin >= 5 ~ "Strong Trump",
-           win_margin >= 1 ~ "Lean Trump",
+           win_margin >= 2 ~ "Lean Trump",
            win_margin <= -5 ~ "Strong Biden",
-           win_margin <= -1 ~ "Lean Biden",
+           win_margin <= -2 ~ "Lean Biden",
            TRUE ~ "Toss-Up"
          )) %>% 
   select(state, winner, win_margin, win_margin_group)
