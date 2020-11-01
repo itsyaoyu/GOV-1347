@@ -1,0 +1,44 @@
+---
+title: "08-Prediction"
+author: "Yao Yu"
+date: "10/26/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in libraries
+
+library(tidyverse)
+library(plotly)
+library(scales)
+library(htmlwidgets)
+library(jtools)
+library(kableExtra)
+library(statebins)
+library(caret)
+
+# Reading in Data
+popvote <- read_csv("../data/08-prediction/popvote_1948-2016_clean.csv")
+popvote_state <- read_csv("../data/08-prediction/popvote_bystate_1948-2016_clean.csv")
+polls_2020 <- read_csv("../data/08-prediction/president_polls_clean.csv")
+polls_2020_state <- read_csv("../data/08-prediction/president_polls_state_clean.csv")
+polls_past <- read_csv("../data/08-prediction/pollavg_1968-2016_clean.csv")
+polls_past_state <- read_csv("../data/08-prediction/pollavg_bystate_1968-2016_clean.csv")
+approval_gallup <- read_csv("../data/08-prediction/approval_gallup_1941-2020_clean.csv")
+ec <- read_csv("../data/08-prediction/ec_2020.csv")
+```
+
+```{r popular vote}
+
+
+
+```
+
+```{r electoral college}
+
+
+
+```
+
