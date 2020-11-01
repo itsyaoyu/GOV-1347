@@ -11,13 +11,12 @@ knitr::opts_chunk$set(echo = FALSE)
 # Loading in libraries
 
 library(tidyverse)
-library(plotly)
 library(scales)
-library(htmlwidgets)
 library(jtools)
 library(kableExtra)
 library(statebins)
 library(caret)
+library(huxtable)
 
 # Reading in Data
 past_elections <- read_csv("../data/08-prediction/popvote_1948-2016_clean.csv")
@@ -94,6 +93,8 @@ model_outputs <- export_summs(model_1$finalModel, model_2$finalModel, model_3$fi
 
 model_outputs
 
+# quick_pdf(model_outputs, file = "national_models_table.pdf")
+
 # Joining data for 2020 prediction
 
 data_2020 <- polls_2020 %>% 
@@ -154,18 +155,24 @@ sim_2020_plot <- sims_2020_scaled %>%
   theme_classic() +
   labs(
     title = "Two-Party Popular Vote Predictive Interval",
-    subtitle = "results are from 10,000 simulations of our model",
+    subtitle = "results are from 10,000 simulations of my model",
     x = "Two-Party Popular Vote",
     y = "Density" ) + 
-#  scale_x_continuous(breaks = seq(46, 60, by = 2), labels = percent_format(accuracy = 1, scale = 1)) +
+  scale_x_continuous(breaks = seq(44, 56, by = 2), labels = percent_format(accuracy = 1, scale = 1)) +
   scale_y_continuous(labels = percent_format(accuracy = 1)) +
   scale_color_manual(values=c("#619CFF", "#F8766D"), breaks = c("Biden", "Trump")) +
   scale_fill_manual(values=c("#619CFF", "#F8766D"), breaks = c("Biden", "Trump")) +
-  theme(legend.position = "none")
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
 
 # Saving plot as image (uncomment to save)
 
-# png("graphics/pv2p_2020_plot.png", units="in", width=7, height=5, res=300)
+# png("2020_pv2p_interval_plot.png", units="in", width=7, height=5, res=300)
 # print(sim_2020_plot)
 # dev.off()
 
@@ -295,16 +302,20 @@ state_2020_pred_data <- state_data_2020 %>%
   group_nest() %>% 
   mutate(data = map(data, ~unnest(., cols = c()))) %>% 
   inner_join(model_final, by = "state") %>% 
-  mutate(pred = map_dbl(.x = data, .y = model, 
-                        ~predict(.y, newdata = .x, type = "response")[[1]]),
+  mutate(pred = map(.x = data, .y = model, 
+                        ~predict(.y, newdata = .x, type = "response")),
+         pred = map(pred, ~unlist(., use.names=FALSE)),
+         mean_pred = map_dbl(pred, ~mean(.x)),
+         std_pred = map_dbl(pred, ~sd(.x)),
          vep = map_dbl(data, ~.x$VEP)) %>% 
-  select(-c(data, model))
+  select(-c(data, model, pred))
 
 # pv2p of 2020 for each state
   
 state_2020_pred_pv2p <- state_2020_pred_data %>% 
+  select(-std_pred) %>% 
   group_by(state) %>% 
-  pivot_wider(names_from = "party_temp", values_from = "pred") %>% 
+  pivot_wider(names_from = "party_temp", values_from = "mean_pred") %>% 
   mutate(democrat = democrat * vep,
          republican = republican * vep) %>% 
   select(-vep) %>% 
@@ -341,7 +352,7 @@ pred_2020_scaled_plot <- state_2020_plot_data %>%
 
 # Saving plot as image (uncomment to save)
 
-# png("graphics/pred_2020_scaled_plot.png", units="in", width=7, height=5, res=300)
+# png("2020_electoral_map.png", units="in", width=7, height=5, res=300)
 # print(pred_2020_scaled_plot)
 # dev.off()
 
@@ -369,13 +380,83 @@ ec_plot <- ec_plot_data %>%
 
 # Saving plot as image
 
-# png("graphics/pred_2020_ec_bar.png", units="in", width=6, height=1.5, res=100)
+# png("2020_electoral_map_bar.png", units="in", width=6, height=1.5, res=100)
 # print(ec_plot)
 # dev.off()
 
-# Creaing simulated draws
+# Running 10,000 simulations
 
-# mutate(pred_dist = map(.x = pred, .y = vep, ~rbinom(n = 10000, size = .y, prob = .x)))
+state_simulation_data_big <- tibble(key = rep(seq(1, 1000), 102)) %>% 
+  arrange(key) %>% 
+  mutate(state = rep(state_2020_pred_data$state, 1000),
+         party = rep(state_2020_pred_data$party_temp, 1000),
+         mean_pred = rep(state_2020_pred_data$mean_pred, 1000),
+         std_pred = rep(state_2020_pred_data$std_pred, 1000),
+         vep = as.integer(rep(state_2020_pred_data$vep, 1000))) %>% 
+  mutate(pred_sim = map_dbl(.x = mean_pred, .y = std_pred, ~rnorm(1, .x, .y)),
+         pred_vote = map_dbl(.x = pred_sim, .y = vep, ~rbinom(n = 1, size = .y, prob = .x))) %>% 
+  select(-c(mean_pred, std_pred, vep, pred_sim))
+
+democrat_data <- state_simulation_data_big %>% 
+  filter(party == "democrat") %>% 
+  rename(democrat = pred_vote)
+
+republican_data <- state_simulation_data_big %>% 
+  filter(party == "republican") %>% 
+  rename(republican = pred_vote)
+
+sim_final_data <- democrat_data %>% 
+  inner_join(republican_data, by = c("key", "state")) %>% 
+  inner_join(ec %>% select(-year), by = "state") %>% 
+  mutate(biden_win = ifelse(democrat > republican, electors, 0)) %>% 
+  mutate(trump_win = ifelse(democrat < republican, electors, 0)) %>% 
+  select(key, state, biden_win, trump_win) %>% 
+  group_by(key) %>% 
+  summarize(Biden = sum(biden_win),
+            Trump = sum(trump_win),
+            .groups = "drop")
+  
+# Preparing the data for plotting
+
+sim_plot_data <- sim_final_data %>% 
+  pivot_longer(Biden:Trump, names_to = "candidate", values_to = "ec") 
+
+# Plotting the simulated ec votes
+
+sim_plot <- sim_plot_data %>% 
+  ggplot(aes(x = ec, color = fct_relevel(candidate, "Trump", "Biden"), 
+             fill = fct_relevel(candidate, "Trump", "Biden"))) +
+  geom_density(alpha = 0.2) +
+  annotate(geom = 'text', x = mean(sim_final_data$Biden), y = 0.005, label = 'Biden') +
+  annotate(geom = 'text', x = mean(sim_final_data$Trump), y = 0.005, label = 'Trump') +
+  theme_classic() +
+  labs(
+    title = "Electoral College Vote Predictive Interval",
+    subtitle = "results are from 1,000 simulations of my state models",
+    x = "Electoral College Vote",
+    y = "" ) +
+  scale_color_manual(values=c("#619CFF", "#F8766D"), breaks = c("Biden", "Trump")) +
+  scale_fill_manual(values=c("#619CFF", "#F8766D"), breaks = c("Biden", "Trump")) +
+  scale_x_continuous(breaks = c(150, 200, 250, 300, 350, 400)) +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+# Saving plot as image (uncomment to save)
+
+# png("2020_electoral_interval_plot.png", units="in", width=7, height=5, res=300)
+# print(sim_plot)
+# dev.off()
+
+# Seeing how many times Trump won the ec
+
+trump_wins_ec <- sim_final_data %>% 
+  mutate(trump_win = Trump > Biden) %>% 
+  summarize(total = sum(trump_win))
 
 ```
 
