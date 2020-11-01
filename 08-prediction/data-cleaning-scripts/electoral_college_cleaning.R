@@ -49,22 +49,17 @@ polls_2020_state_clean <- polls_2020 %>%
 # write_csv(polls_2020_state_clean, "data/08-prediction/president_polls_state_clean.csv")
 
 # Cleaning for past elections:
-# 1) Pivoting R_pv2p and D_pv2p and fixing party names
-# 2) Add in previous year's pv2p for each party and state using lag. Removing NAs
-# 3) Joining in national data to get needed predictors
-# 4) Filtering for year >= 1988 b/c of limited state polls before then
+# 1) Pivoting D and R and fixing party names
+# 2) Joining in national data to get needed predictors
+# 3) Filtering for year >= 1988 b/c of limited state polls before then
 
 past_elections_state_clean <- past_elections_state %>% 
-  select(-c(total, D, R)) %>% 
-  pivot_longer(R_pv2p:D_pv2p, names_to = "party", values_to = "pv2p") %>% 
+  select(-c(total, D_pv2p, R_pv2p)) %>% 
+  pivot_longer(D:R, names_to = "party", values_to = "votes") %>% 
   mutate(party = case_when(
-    party == "D_pv2p" ~ "democrat",
-    party == "R_pv2p" ~ "republican"
+    party == "D" ~ "democrat",
+    party == "R" ~ "republican"
   )) %>% 
-  group_by(state, party) %>% 
-  mutate(last_pv2p = lag(pv2p, order_by = year)) %>% 
-  ungroup() %>% 
-  drop_na(last_pv2p) %>% 
   left_join(past_elections %>% 
               select(year, party, winner, incumbent, incumbent_party), by = c("year", "party")) %>% 
   filter(year >= 1988)
