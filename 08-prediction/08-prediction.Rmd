@@ -407,6 +407,7 @@ republican_data <- state_simulation_data_big %>%
 
 sim_final_data <- democrat_data %>% 
   inner_join(republican_data, by = c("key", "state")) %>% 
+  mutate(state = ifelse(state == "District of Columbia", "D.C.", state)) %>% 
   inner_join(ec %>% select(-year), by = "state") %>% 
   mutate(biden_win = ifelse(democrat > republican, electors, 0)) %>% 
   mutate(trump_win = ifelse(democrat < republican, electors, 0)) %>% 
