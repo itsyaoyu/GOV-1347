@@ -2,7 +2,7 @@
 
 Code, data, and figures used in my GOV 1347 Election Analytics Blog posts for the 2020 Presidential Election.
 
-![](07-shocks/pred_2020_map.png)
+![](08-prediction/2020_electoral_map_full.png)
 
 ## Table of Contents
 
@@ -19,3 +19,5 @@ Code, data, and figures used in my GOV 1347 Election Analytics Blog posts for th
 6. [Demographics](https://itsyaoyu.com/blog/gov-1347-demographics/)
 
 7. [Shocks](https://itsyaoyu.com/blog/gov-1347-shocks/)
+
+8. [Final Prediction]()
