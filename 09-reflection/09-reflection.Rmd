@@ -1,0 +1,26 @@
+---
+title: "09-Reflection"
+author: "Yao Yu"
+date: "11/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(googlesheets4)
+library(janitor)
+
+gs4_deauth()
+
+results <- read_sheet("1faxciehjNpYFNivz-Kiu5wGl32ulPJhdJTDsULlza5E") %>% 
+  clean_names()
+```
+
+```{r}
+
+
+
+```
+
