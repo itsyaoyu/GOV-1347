@@ -461,3 +461,16 @@ trump_wins_ec <- sim_final_data %>%
 
 ```
 
+```{r}
+
+# Saving pv2p and state predictions
+
+pv2p_pred <- tibble(party = c("democrat", "republican"),
+                    pred_pv2p = c(biden, trump))
+
+# write_csv(pv2p_pred, "../data/09-reflection/pv2p_pred.csv")
+
+# write_csv(state_2020_pred_pv2p, "../data/09-reflection/state_pred.csv")
+
+```
+

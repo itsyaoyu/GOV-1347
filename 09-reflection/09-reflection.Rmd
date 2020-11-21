@@ -8,19 +8,258 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 
+# Loading in necessary libraries
+
 library(tidyverse)
-library(googlesheets4)
 library(janitor)
+library(scales)
+library(plotly)
+library(reactable)
+library(htmlwidgets)
 
-gs4_deauth()
+# Reading in data
 
-results <- read_sheet("1faxciehjNpYFNivz-Kiu5wGl32ulPJhdJTDsULlza5E") %>% 
-  clean_names()
+elections <- read_csv("../data/09-reflection/popvote_1948-2020.csv") %>% 
+  mutate(pv2p = ifelse(year == 2020, pv2p * 100, pv2p))
+elections_state <- read_csv("../data/09-reflection/popvote_bystate_1948-2020.csv")
+polls_past <- read_csv("../data/08-prediction/pollavg_1968-2016_clean.csv")
+polls_2020 <- read_csv("../data/08-prediction/president_polls_clean.csv") %>% 
+  mutate(year = 2020)
+polls_2020_state <- read_csv("../data/08-prediction/president_polls_state_clean.csv")
+job_approval_gallup <- read_csv("../data/08-prediction/approval_gallup_1941-2020_clean.csv")
+
+# Reading in my predictions
+
+pv2p_pred <- read_csv("../data/09-reflection/pv2p_pred.csv")
+state_pred <- read_csv("../data/09-reflection/state_pred.csv")
+
 ```
 
-```{r}
+```{r popular vote}
+
+# Recreating my popular vote model from 08-prediction.Rmd below 
+
+# Setting the same seed
+
+set.seed(1347)
+
+# Joining all the data together
+
+full_data <- polls_past %>% 
+  full_join(polls_2020, by = c("year", "party", "average_poll")) %>% 
+  inner_join(elections, by = c("year", "party")) %>% 
+  inner_join(job_approval_gallup, by = "year") %>% 
+  group_by(party) %>%
+  mutate(last_pv2p = lag(pv2p, order_by = year),
+         party_temp = party) %>% 
+  drop_na() %>% 
+  ungroup()
+
+# Creating the same final model using data before 2020
+
+final_pv2p_model <- lm(pv2p ~ average_poll + last_pv2p + incumbent_party*job_approval + party, data = full_data %>% filter(year != 2020))
+
+# Making my 2020 predictions and scaling to 100-points
+
+full_data_pred <- full_data %>% 
+  group_by(year, party_temp) %>% 
+  nest() %>% 
+  mutate(pred = map_dbl(data, ~predict(final_pv2p_model, .x))) %>% 
+  select(-data) %>% 
+  pivot_wider(names_from = party_temp, values_from = pred) %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total,
+         republican = republican / total) %>% 
+  select(-total) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "pred") %>% 
+  mutate(is_2020 = ifelse(year != 2020, "train", "test")) %>% 
+  full_join(full_data %>% select(year, party, pv2p, candidate), by = c("year", "party")) %>% 
+  filter(party == "democrat") %>% 
+  mutate(pv2p = round(pv2p, 1),
+         pred = round(pred * 100, 1))
+
+# Plotting actual vs predicted pv2p
+
+pv2p_plot <- full_data_pred %>% 
+  ggplot(aes(x = pred, y = pv2p, color = is_2020, labels = candidate)) + 
+  geom_point() + 
+  geom_abline() +
+  scale_x_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(38, 55)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(38, 55)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(title = "Evaluating My 2020 Two-Party Popular Vote Prediction",
+       x = "Predicted Democrat Two-Party Popular Vote",
+       y = "Actual Democrat Two-Party Popular Vote")
+
+# Switching to plotly
+
+pv2p_plotly <- ggplotly(pv2p_plot, tooltip = c("candidate", "pv2p", "pred"))
+
+# Saving plotly graph
+
+# saveWidget(pv2p_plotly, "pv2p_pred_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+```
+
+```{r state pred}
+
+# Joining the actual vs pred data
+
+state_2020 <- elections_state %>% 
+  filter(year == 2020) %>% 
+  select(state, D_pv2p, R_pv2p) %>% 
+  mutate(close = ifelse(abs(D_pv2p - R_pv2p) < .1, "close", "safe")) %>% 
+  pivot_longer(D_pv2p:R_pv2p, names_to = "party", values_to = "pv2p") %>% 
+  mutate(party = case_when(
+    party == "D_pv2p" ~ "democrat",
+    TRUE ~ "republican"
+  )) %>% 
+  mutate(pv2p = pv2p * 100)
+
+# Calculating the difference between actual and predicted
+
+state_pv2p_results <- state_2020 %>% 
+  inner_join(state_pred, by = c("state", "party")) %>% 
+  filter(party == "democrat") %>% 
+  mutate(d_diff = pv2p - pred_votes)
+
+# Calculating the mse and rmse for all states
+
+mse_all = sum(state_pv2p_results$d_diff**2) / nrow(state_pv2p_results)
+
+rmse_all = sqrt(mse_all)
+
+# Calculating the mse and rmse for states that Biden won by less than a 10% margin
+
+close_states_results <- state_pv2p_results %>% 
+  filter(close == "close")
+
+mse_close = sum(close_states_results$d_diff**2) / nrow(close_states_results)
+
+rmse_close = sqrt(mse_close)
 
 
+# Plotting actual vs predicted state pv2p
+
+state_pv2p_plot <- state_pv2p_results %>% 
+  mutate(pred_votes = round(pred_votes, 1),
+         pv2p = round(pv2p, 1)) %>% 
+  ggplot(aes(x = pred_votes, y = pv2p, color = close, labels = state)) +
+  geom_point() + 
+  geom_abline() +
+  scale_x_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(25, 95), breaks = c(30, 40, 50, 60, 70, 80, 90)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(25, 95), breaks = c(30, 40, 50, 60, 70, 80, 90)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(title = "Actual vs Predicted Biden Two-Party Popular Vote per State",
+       x = "Predicted Biden Two-Party Popular Vote",
+       y = "Actual Biden Two-Party Popular Vote")
+
+# Switching to plotly
+
+pv2p_state_plotly <- ggplotly(state_pv2p_plot, tooltip = c("state", "pv2p", "pred_votes"))
+
+# Saving plotly graph
+
+# saveWidget(pv2p_state_plotly, "pv2p_state_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+
+# Plotting actual pv2p vs. average polls
+
+polls_plot <- polls_2020_state %>% 
+  pivot_wider(names_from = "party", values_from = "average_poll") %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total * 100,
+         republican = republican / total * 100) %>% 
+  select(-total) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "avg_poll") %>% 
+  inner_join(state_pv2p_results, by = c("state", "party")) %>% 
+  mutate(avg_poll = round(avg_poll, 1),
+         pv2p = round(pv2p, 1)) %>% 
+  ggplot(aes(x = avg_poll, y = pv2p, color = close, labels = state)) +
+  geom_point() + 
+  geom_abline() +
+  scale_x_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(25, 95), breaks = c(30, 40, 50, 60, 70, 80, 90)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1, scale = 1), limits = c(25, 95), breaks = c(30, 40, 50, 60, 70, 80, 90)) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  labs(title = "Actual Biden Two-Party Popular Vote vs Average State Polls per state",
+       x = "Average State Polls",
+       y = "Biden Two-Party Popular Vote")
+
+# Switching to plotly
+
+polls_plotly <- ggplotly(polls_plot, tooltip = c("state", "pv2p", "avg_poll"))
+
+# Saving plotly graph
+
+# saveWidget(polls_plotly, "polls_plotly.html", selfcontained = FALSE, libdir = "lib")
+
+
+# Joining data to calculate mse and rmse for polls
+
+polls_2020_state_results <- polls_2020_state %>% 
+  pivot_wider(names_from = "party", values_from = "average_poll") %>% 
+  mutate(total = democrat + republican,
+         democrat = democrat / total * 100,
+         republican = republican / total * 100) %>% 
+  select(-total) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "avg_poll") %>% 
+  inner_join(state_pv2p_results, by = c("state", "party")) %>% 
+  mutate(d_diff = pv2p - avg_poll)
+
+# Calculating the polls mse and rmse for all states
+
+mse_polls = sum(polls_2020_state_results$d_diff**2) / nrow(polls_2020_state_results)
+
+rmse_polls = sqrt(mse_polls)
+
+# Now calculating the mse and rmse of the close states 
+
+close_states_polls <- polls_2020_state_results %>% 
+  filter(close == "close")
+
+mse_polls_close = sum(close_states_polls$d_diff**2) / nrow(close_states_polls)
+
+rmse_polls_close = sqrt(mse_polls_close)
+
+
+# Now seeing how many states the polls model got right
+
+incorrect_polls <- polls_2020_state %>% 
+  pivot_wider(names_from = "party", values_from = "average_poll") %>% 
+  inner_join(state_2020 %>% pivot_wider(names_from = "party", values_from = "pv2p"), by = "state") %>% 
+  mutate(d_win = democrat.y > republican.y,
+         d_pred_win = democrat.x > republican.x,
+         correct_pred = d_win == d_pred_win) %>% 
+  arrange(correct_pred)
+
+```
+
+```{r mse and rmse}
+
+# Creating a table of all my mse and rmse values
+
+se_table <- tibble(name = c("All States Model", "All States Polls", "Close States Model", "Close States Polls"),
+                   mse = c(mse_all, mse_polls, mse_close, mse_polls_close),
+                   rmse = c(rmse_all, rmse_polls, rmse_close, rmse_polls_close))
+
+se_reactable <- reactable(
+  se_table, 
+  columns = list(
+    name = colDef(name = "Name"),
+    mse = colDef(name = "MSE", format = colFormat(digits = 2)),
+    rmse = colDef(name = "RMSE", format = colFormat(digits = 2))),
+  defaultColDef = colDef(
+    align = "center",
+    minWidth = 30,
+    headerStyle = list(background = "#f7f7f8")
+  ),
+  bordered = TRUE,
+  highlight = TRUE)
+
+# saveWidget(se_reactable, "se_table.html", selfcontained = FALSE, libdir = "lib")
 
 ```
 
