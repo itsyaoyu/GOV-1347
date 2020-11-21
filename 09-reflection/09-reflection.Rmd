@@ -44,6 +44,7 @@ state_pred <- read_csv("../data/09-reflection/state_pred.csv")
 set.seed(1347)
 
 # Joining all the data together
+# Manually adding the 1968 past pv2p data that was in the original data (cut out in dataset)
 
 full_data <- polls_past %>% 
   full_join(polls_2020, by = c("year", "party", "average_poll")) %>% 
@@ -51,8 +52,12 @@ full_data <- polls_past %>%
   inner_join(job_approval_gallup, by = "year") %>% 
   group_by(party) %>%
   mutate(last_pv2p = lag(pv2p, order_by = year),
-         party_temp = party) %>% 
-  drop_na() %>% 
+         party_temp = party,
+         last_pv2p = case_when(
+           year == 1968 & party == "democrat" ~ 61.3,
+           year == 1968 & party == "republican" ~ 38.7,
+           TRUE ~ last_pv2p
+         )) %>%
   ungroup()
 
 # Creating the same final model using data before 2020
