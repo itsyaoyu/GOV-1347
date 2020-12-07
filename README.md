@@ -21,3 +21,7 @@ Code, data, and figures used in my GOV 1347 Election Analytics Blog posts for th
 7. [Shocks](https://itsyaoyu.com/blog/gov-1347-shocks/)
 
 8. [Final Prediction](https://itsyaoyu.com/blog/gov-1347-final-prediction/)
+
+9. [Reflection](https://itsyaoyu.com/blog/gov-1347-reflection/)
+
+10. [Narrative](https://itsyaoyu.com/blog/gov-1347-narrative/)
