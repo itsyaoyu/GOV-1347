@@ -1,0 +1,247 @@
+---
+title: "10-narrative"
+author: "Yao Yu"
+date: "11/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# Loading in necessary packages
+
+library(tidyverse)
+library(gganimate)
+library(janitor)
+library(scales)
+
+# Reading in election data
+
+past_county <- read_csv("../data/10-narrative/countypres_2000-2016.csv")
+county_new <- read_csv("../data/10-narrative/CountyResults2020.csv", skip = 1)
+
+# Reading in covid data
+
+covid_county <- read_csv("../data/10-narrative/us-counties-covid.csv") %>% 
+  filter(date == "2020-11-03")
+pop_county <- read_csv("../data/10-narrative/covid_county_population_usafacts-1.csv") %>% 
+  clean_names()
+
+# Reading in census population data
+pop_2000 <- read_csv("../data/10-narrative/pop-2000-2010.csv") %>% 
+  clean_names()
+pop_2010 <- read_csv("../data/10-narrative/pop-2010-2020.csv", skip = 3)
+
+```
+
+```{r 2020v2016 plot}
+
+# Filtering for 2016 data
+
+county_2016 <- past_county %>% 
+  filter(year == 2016) %>% 
+  filter(candidate %in% c("Hillary Clinton", "Donald Trump")) %>% 
+  select(year, state, county, FIPS, party, candidatevotes) %>% 
+  pivot_wider(names_from = "party", values_from = "candidatevotes") %>% 
+  mutate(total_2p = democrat + republican,
+         democrat = democrat / total_2p,
+         republican = republican / total_2p) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "votes") %>% 
+  rename(fips = FIPS)
+
+# Cleaning 2020 county data (adding in state data from 2016)
+
+county_2020 <- county_new %>% 
+  select(fips, name, vote1, vote2) %>% 
+  mutate(total_2p = vote1 + vote2,
+         vote1 = vote1 / total_2p,
+         vote2 = vote2 / total_2p) %>% 
+  rename(county = name,
+         democrat = vote1,
+         republican = vote2) %>% 
+  mutate(year = 2020) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "votes") %>% 
+  inner_join(county_2016 %>% 
+               filter(party == "democrat") %>% 
+               select(state, county, fips), by = c("county", "fips"))
+
+# Joining the 2016 and 2020 data
+# Note: Fixed broken county names and imported Kansas City, MI data from https://www.kceb.org/elections/current-election/
+
+data_full <- county_2016 %>% 
+  full_join(county_2020, by = c("year", "state", "county", "fips", "total_2p", "party", "votes")) %>% 
+  drop_na() %>% 
+  mutate(state_county_fips = paste(state, county, fips, sep = ", "))
+
+# Plotting the 2020 vs 2016 results
+
+compare_plot <- data_full %>% 
+  filter(party == "democrat") %>% 
+  select(-total_2p) %>% 
+  pivot_wider(names_from = "year", values_from = "votes") %>% 
+  ggplot(aes(x = `2016`, y = `2020`, group = state_county_fips, label = county)) +
+  geom_point(aes(alpha = 0.1), show.legend = FALSE) +
+  geom_abline() +
+  scale_x_continuous(labels = percent, limits = c(0, 1)) +
+  scale_y_continuous(labels = percent, limits = c(0, 1)) +
+  theme_classic() + 
+  labs(title = "County-Level Democratic Two-Party Popular Vote Share in 2020 vs. 2016")
+
+# Saving plot as image
+
+# png("2020_vs_2016_plot.png", units="in", width=7, height=5, res=300)
+# print(compare_plot)
+# dev.off()
+  
+```
+
+```{r covid plots}
+
+# Joining county covid and pop data
+
+covid_full <- pop_county %>% 
+  inner_join(covid_county %>% mutate(fips = as.numeric(fips)), by = c("county_fips" = "fips")) %>% 
+  select(county_fips, state.y, cases, deaths, population)
+
+# Plotting turnout_increase by covid cases log
+
+covid_plot <- data_full %>% 
+  inner_join(covid_full, by = c("fips" = "county_fips", "state" = "state.y")) %>% 
+  select(-votes) %>% 
+  pivot_wider(names_from = "year", values_from = "total_2p") %>% 
+  mutate(cases_prop = cases / population,
+         deaths_prop = deaths / population,
+         cases_log = log(cases),
+         deaths_log = log(deaths),
+         turnout_increase = (`2020` - `2016`)/`2016`*100) %>% 
+  filter(party == "republican") %>% 
+  ggplot(aes(x = cases_log, y = turnout_increase, group = state_county_fips, label = county)) +
+  geom_point(aes(alpha = 0.1), show.legend = FALSE) +
+  scale_y_continuous(labels = percent_format(scale = 1)) +
+  theme_classic() +
+  labs(title = "County-Level 2020 Election Turnout Change vs. Covid Cases (log)",
+       x = "Covid Cases (log)",
+       y = "Turnout Change")
+
+# Saving plot as image
+
+# png("turnout_vs_covid_plot.png", units="in", width=7, height=5, res=300)
+# print(covid_plot)
+# dev.off()
+
+# Plotting turnout_increase by population log
+
+pop_plot <- data_full %>% 
+  inner_join(covid_full, by = c("fips" = "county_fips", "state" = "state.y")) %>% 
+  select(-votes) %>% 
+  pivot_wider(names_from = "year", values_from = "total_2p") %>% 
+  mutate(cases_prop = cases / population,
+         deaths_prop = deaths / population,
+         cases_log = log(cases),
+         deaths_log = log(deaths),
+         population_log = log(population),
+         turnout_increase = (`2020` - `2016`)/`2016`*100) %>% 
+  filter(party == "republican") %>% 
+  ggplot(aes(x = population_log, y = turnout_increase, group = state_county_fips, label = county)) +
+  geom_point(aes(alpha = 0.1), show.legend = FALSE) +
+  scale_y_continuous(labels = percent_format(scale = 1)) +
+  theme_classic() +
+  labs(title = "County-Level 2020 Election Turnout Change vs. Population (log)",
+       x = "Population (log)",
+       y = "Turnout Change")
+
+# Saving plot as image
+
+# png("turnout_vs_pop_plot.png", units="in", width=7, height=5, res=300)
+# print(pop_plot)
+# dev.off()
+
+```
+
+
+```{r population gif}
+
+# Cleaning the 2000s population data
+
+pop_2000_clean <- pop_2000 %>% 
+  select(-c(sumlev, region, division, state, county, estimatesbase2000, census2010pop, popestimate2010)) %>% 
+  mutate(ctyname = str_remove(ctyname, " County")) %>% 
+  pivot_longer(popestimate2000:popestimate2009, names_to = "year", values_to = "pop") %>% 
+  mutate(year = str_remove(year, "[a-z]+"),
+         year = as.numeric(year)) %>% 
+  rename(state = stname,
+         county = ctyname) %>% 
+  select(year, state, county, pop)
+
+# Cleaning the 2010s population data
+
+pop_2010_clean <- pop_2010 %>% 
+  mutate(X1 = str_remove(X1, "."),
+         X1 = str_remove(X1, " County")) %>% 
+  slice(-1) %>% 
+  separate(X1, c("county", "state"), sep = ", ") %>% 
+  select(-c(Census, `Estimates Base`)) %>% 
+  pivot_longer(`2010`:`2019`, names_to = "year", values_to = "pop") %>% 
+  mutate(year = as.numeric(year)) %>% 
+  select(year, state, county, pop)
+
+# Joining the 2000s and 2010s population data
+
+pop_all <- pop_2000_clean %>% 
+  rbind(pop_2010_clean)
+
+# Joining pop vote with past county election data
+
+pop_vote_data_past <- past_county %>% 
+  filter(party %in% c("democrat", "republican")) %>% 
+  select(year, state, county, FIPS, party, candidatevotes) %>% 
+  pivot_wider(names_from = "party", values_from = "candidatevotes") %>% 
+  mutate(total_2p = democrat + republican,
+         democrat = democrat / total_2p,
+         republican = republican / total_2p) %>% 
+  select(-total_2p) %>% 
+  pivot_longer(democrat:republican, names_to = "party", values_to = "votes_2p") %>% 
+  inner_join(pop_all, by = c("county", "state", "year")) %>% 
+  mutate(pop_log = log(pop)) %>% 
+  filter(party == "democrat") %>% 
+  drop_na() %>% 
+  mutate(state_county_fips = paste(county, state, FIPS, sep = ", ")) %>% 
+  rename(fips = FIPS)
+
+# Joining pop vote with 2020 county election data
+
+pop_vote_data_2020 <- data_full %>% 
+  filter(year == 2020) %>% 
+  select(state, county, fips, party, total_2p, votes) %>% 
+  inner_join(pop_all %>% filter(year == 2019), by = c("state", "county")) %>% 
+  mutate(year = 2020,
+         pop_log = log(pop),
+         state_county_fips = paste(county, state, fips, sep = ", ")) %>% 
+  filter(party == "democrat") %>% 
+  select(year, state, county, fips, party, votes, pop, pop_log, state_county_fips) %>%
+  rename(votes_2p = votes)
+
+# Combining past pop vote with county eleection data with 2020 data
+
+pop_vote_data_all <- pop_vote_data_past %>% 
+  rbind(pop_vote_data_2020)
+  
+# Plotting the animation of how different counties have shifted democratic voting patterns
+
+pop_vote_gif <- pop_vote_data_all %>% 
+  ggplot(aes(x = pop_log, y = votes_2p, size = pop, group = state_county_fips)) +
+  geom_point(alpha = 0.2, show.legend = FALSE) +
+  transition_states(year) +
+  theme_classic() +
+  scale_y_continuous(labels = percent) +
+  labs(title = "County Democratic Two-Party Vote Share in {previous_state}",
+       x = "Population (Log)", 
+       y = "Two-Party Democratic Vote")
+
+# Saving the animation into a gif
+
+# animate(pop_vote_gif, height = 5, width = 7, units = "in", res = 300)
+# anim_save("pop_vote_time_plot.gif")
+
+```
+
